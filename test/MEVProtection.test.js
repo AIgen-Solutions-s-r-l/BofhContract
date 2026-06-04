@@ -127,7 +127,7 @@ describe("MEV Protection Tests", function () {
 
       // MEV protection disabled by default
       const path = [await baseToken.getAddress(), await tokenA.getAddress(), await baseToken.getAddress()];
-      const fees = [3000, 3000];
+      const fees = [30, 30];
       const amountIn = ethers.parseEther("10");
       const minAmountOut = ethers.parseEther("1");
       const deadline = Math.floor(Date.now() / 1000) + 3600;
@@ -145,7 +145,7 @@ describe("MEV Protection Tests", function () {
       await bofh.connect(owner).configureMEVProtection(true, 10, 60);
 
       const path = [await baseToken.getAddress(), await tokenA.getAddress(), await baseToken.getAddress()];
-      const fees = [3000, 3000];
+      const fees = [30, 30];
       const amountIn = ethers.parseEther("1");
       const minAmountOut = ethers.parseEther("0.1");
       const deadline = Math.floor(Date.now() / 1000) + 3600;
@@ -166,7 +166,7 @@ describe("MEV Protection Tests", function () {
       await bofh.connect(owner).configureMEVProtection(true, 10, 5);
 
       const path = [await baseToken.getAddress(), await tokenA.getAddress(), await baseToken.getAddress()];
-      const fees = [3000, 3000];
+      const fees = [30, 30];
       const amountIn = ethers.parseEther("1");
       const minAmountOut = ethers.parseEther("0.1");
       const deadline = Math.floor(Date.now() / 1000) + 3600;
@@ -188,7 +188,7 @@ describe("MEV Protection Tests", function () {
 
       // MEV protection disabled by default
       const path = [await baseToken.getAddress(), await tokenA.getAddress(), await baseToken.getAddress()];
-      const fees = [3000, 3000];
+      const fees = [30, 30];
       const amountIn = ethers.parseEther("0.5");
       const minAmountOut = ethers.parseEther("0.1");
       const deadline = Math.floor(Date.now() / 1000) + 3600;
@@ -211,7 +211,7 @@ describe("MEV Protection Tests", function () {
       await bofh.connect(owner).emergencyPause();
 
       const path = [await baseToken.getAddress(), await tokenA.getAddress(), await baseToken.getAddress()];
-      const fees = [3000, 3000];
+      const fees = [30, 30];
       const amountIn = ethers.parseEther("1");
       const minAmountOut = ethers.parseEther("0.1");
       const deadline = Math.floor(Date.now() / 1000) + 3600;

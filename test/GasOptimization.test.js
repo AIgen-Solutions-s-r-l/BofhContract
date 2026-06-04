@@ -88,7 +88,7 @@ describe("Gas Optimization Analysis", function () {
       const { bofh, baseToken, tokenA, owner } = await loadFixture(deployContractsFixture);
 
       const path = [await baseToken.getAddress(), await tokenA.getAddress(), await baseToken.getAddress()];
-      const fees = [3, 3]; // 0.3% fee for each hop
+      const fees = [30, 30]; // 0.3% fee for each hop (30/10000)
       const amountIn = ethers.parseEther("1000");
       const deadline = Math.floor(Date.now() / 1000) + 3600;
 
@@ -110,7 +110,7 @@ describe("Gas Optimization Analysis", function () {
         await tokenB.getAddress(),
         await baseToken.getAddress(),
       ];
-      const fees = [3, 3, 3];
+      const fees = [30, 30, 30];
       const amountIn = ethers.parseEther("1000");
       const deadline = Math.floor(Date.now() / 1000) + 3600;
 
@@ -133,7 +133,7 @@ describe("Gas Optimization Analysis", function () {
         await tokenC.getAddress(),
         await baseToken.getAddress(),
       ];
-      const fees = [3, 3, 3, 3];
+      const fees = [30, 30, 30, 30];
       const amountIn = ethers.parseEther("1000");
       const deadline = Math.floor(Date.now() / 1000) + 3600;
 
@@ -157,7 +157,7 @@ describe("Gas Optimization Analysis", function () {
         await tokenD.getAddress(),
         await baseToken.getAddress(),
       ];
-      const fees = [3, 3, 3, 3, 3];
+      const fees = [30, 30, 30, 30, 30];
       const amountIn = ethers.parseEther("1000");
       const deadline = Math.floor(Date.now() / 1000) + 3600;
 
@@ -176,7 +176,7 @@ describe("Gas Optimization Analysis", function () {
       const { bofh, baseToken, tokenA } = await loadFixture(deployContractsFixture);
 
       const path = [await baseToken.getAddress(), await tokenA.getAddress(), await baseToken.getAddress()];
-      const fees = [3, 3];
+      const fees = [30, 30];
       const amountIn = ethers.parseEther("10");
       const deadline = Math.floor(Date.now() / 1000) + 3600;
 
@@ -190,7 +190,7 @@ describe("Gas Optimization Analysis", function () {
       const { bofh, baseToken, tokenA } = await loadFixture(deployContractsFixture);
 
       const path = [await baseToken.getAddress(), await tokenA.getAddress(), await baseToken.getAddress()];
-      const fees = [3, 3];
+      const fees = [30, 30];
       const amountIn = ethers.parseEther("5000");
       const deadline = Math.floor(Date.now() / 1000) + 3600;
 
