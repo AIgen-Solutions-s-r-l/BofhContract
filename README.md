@@ -189,7 +189,6 @@
 - [API Reference](docs/API_REFERENCE.md)
 - [Deployment Guide](docs/DEPLOYMENT.md)
 - [Code Style Guide](docs/STYLE_GUIDE.md)
-- [Monitoring Guide](docs/MONITORING.md)
 
 </td>
 </tr>
@@ -919,7 +918,6 @@ npm run configure:mainnet    # Configure mainnet
 
 ### 🎯 Current Sprint (Sprint 5 Completion)
 
-- [ ] **Issue #33** - Complete monitoring stack (Prometheus + Grafana)
 - [ ] **Issue #30** - Storage layout optimization
 - [ ] **Issue #32** - Oracle integration (Chainlink price feeds)
 - [ ] **Issue #34** - Finalize production readiness roadmap
