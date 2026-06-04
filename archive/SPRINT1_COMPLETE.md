@@ -118,7 +118,7 @@ Removed exposed BSCScan API key and implemented proper secrets management.
 - Added `env.json` to `.gitignore`
 - Updated README with setup instructions
 
-**⚠️ ACTION REQUIRED**: Rotate exposed key `CYQ9FQGEKRIHZ4RXFDPFYERJPIXZNZFXD9`
+**⚠️ ACTION REQUIRED**: Rotate exposed key `<REDACTED>`
 
 **Impact**: Prevents unauthorized API usage and protects deployment credentials
 

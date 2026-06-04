@@ -32,7 +32,7 @@
 - ✅ Updated README with environment setup instructions
 - ✅ Fixed merge conflict markers in `.gitignore`
 
-**Security Note**: API key `CYQ9FQGEKRIHZ4RXFDPFYERJPIXZNZFXD9` must be rotated
+**Security Note**: API key `<REDACTED>` must be rotated
 
 **Resolution**: Issue #5 - Resolves exposed secrets
 
@@ -151,7 +151,7 @@ Contracts Moved:     2 (to .variants/)
 ### Immediate Actions Required (User)
 1. **Rotate BSCScan API key** (CRITICAL):
    - Visit: https://bscscan.com/myapikey
-   - Rotate exposed key: `CYQ9FQGEKRIHZ4RXFDPFYERJPIXZNZFXD9`
+   - Rotate exposed key: `<REDACTED>`
    - Update `env.json` with new key
 
 ### Ready for Review

@@ -284,7 +284,7 @@ function changeAdmin(address newOwner) external onlyOwner {
 
 ### CRITICAL - Required Immediately
 1. **Rotate BSCScan API Key**
-   - Exposed Key: `CYQ9FQGEKRIHZ4RXFDPFYERJPIXZNZFXD9`
+   - Exposed Key: `<REDACTED>`
    - Action: Visit https://bscscan.com/myapikey
    - Update: Local `env.json` with new key
 

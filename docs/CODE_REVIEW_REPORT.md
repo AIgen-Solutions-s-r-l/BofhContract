@@ -129,7 +129,7 @@ function changeAdmin(address newOwner) external onlyOwner {
 - ✅ Updated README with setup instructions
 
 **⚠️ CRITICAL USER ACTION REQUIRED**:
-- Exposed key `CYQ9FQGEKRIHZ4RXFDPFYERJPIXZNZFXD9` must be rotated
+- Exposed key `<REDACTED>` must be rotated
 - User must visit https://bscscan.com/myapikey
 
 **Recommendation**: ✅ **APPROVE** - Proper implementation, awaiting user action
@@ -436,7 +436,7 @@ Reentrancy check:       +100 gas (SLOAD + comparison)
 ### 7.1 Pre-Merge (REQUIRED)
 
 **User Actions**:
-1. ⚠️ **CRITICAL**: Rotate BSCScan API key `CYQ9FQGEKRIHZ4RXFDPFYERJPIXZNZFXD9`
+1. ⚠️ **CRITICAL**: Rotate BSCScan API key `<REDACTED>`
    - Visit: https://bscscan.com/myapikey
    - Update `env.json` with new key
 
