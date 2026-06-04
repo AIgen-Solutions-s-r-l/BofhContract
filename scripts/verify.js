@@ -1,5 +1,16 @@
 const hre = require('hardhat');
 const { loadDeployment, verifyContract, delay } = require('./utils/helpers');
+const { isLocalNetwork } = require('./utils/addresses');
+
+// Block-explorer base URLs per network (used only for the post-verification link).
+const EXPLORERS = {
+  bsc: 'https://bscscan.com',
+  bscTestnet: 'https://testnet.bscscan.com',
+  polygon: 'https://polygonscan.com',
+  polygonAmoy: 'https://amoy.polygonscan.com',
+  base: 'https://basescan.org',
+  baseSepolia: 'https://sepolia.basescan.org'
+};
 
 async function main() {
   console.log('\n🔍 Starting contract verification...\n');
@@ -17,9 +28,10 @@ async function main() {
 
   console.log(`📝 Loaded deployment from: deployments/${networkName}.json\n`);
 
-  // Only verify on public networks
-  if (networkName !== 'bscTestnet' && networkName !== 'bsc') {
-    console.log('ℹ️  Verification only available for bscTestnet and bsc networks');
+  // Skip verification only on local networks (no public explorer). Any live EVM
+  // network is supported via hardhat-verify + the per-chain etherscan config.
+  if (isLocalNetwork(networkName)) {
+    console.log('ℹ️  Skipping verification on local network');
     process.exit(0);
   }
 
@@ -93,12 +105,11 @@ async function main() {
   console.log(`   PoolLib: ${deployment.libraries.PoolLib}`);
   console.log(`   BofhContractV2: ${deployment.contracts.BofhContractV2}`);
 
-  const explorerUrl = networkName === 'bscTestnet'
-    ? 'https://testnet.bscscan.com'
-    : 'https://bscscan.com';
-
-  console.log(`\n🔗 View on BSCScan:`);
-  console.log(`   ${explorerUrl}/address/${deployment.contracts.BofhContractV2}#code`);
+  const explorerUrl = EXPLORERS[networkName];
+  if (explorerUrl) {
+    console.log(`\n🔗 View on explorer:`);
+    console.log(`   ${explorerUrl}/address/${deployment.contracts.BofhContractV2}#code`);
+  }
   console.log('='.repeat(60) + '\n');
 }
 
