@@ -6,14 +6,17 @@ import "../libs/MathLib.sol";
 import "../libs/PoolLib.sol";
 import "../interfaces/ISwapInterfaces.sol";
 import "../interfaces/IBofhContractBase.sol";
+import "./DexRegistry.sol";
 
 /// @title BofhContractBase - Abstract Base Contract with Security and Risk Management
 /// @author Bofh Team
 /// @notice Provides security features, risk parameters, and MEV protection for swap contracts
 /// @dev Abstract contract inherited by BofhContractV2, implements security primitives and modifiers
+/// @dev Inherits DexRegistry so it can expose the onlyOwner setDex wrapper while keeping the
+/// @dev registry storage/struct/resolver in a separate small contract (respects file size limits).
 /// @custom:security Implements reentrancy protection, access control, pause mechanism, and MEV protection
 /// @custom:risk Configurable risk parameters: maxTradeVolume, minPoolLiquidity, maxPriceImpact, sandwichProtection
-abstract contract BofhContractBase is IBofhContractBase {
+abstract contract BofhContractBase is IBofhContractBase, DexRegistry {
     using SecurityLib for SecurityLib.SecurityState;
     using PoolLib for PoolLib.PoolState;
 
@@ -236,6 +239,24 @@ abstract contract BofhContractBase is IBofhContractBase {
         require(pool != address(0), "Invalid pool");
         blacklistedPools[pool] = blacklisted;
         emit PoolBlacklisted(pool, blacklisted);
+    }
+
+    /// @notice Register or update a DEX for multi-DEX routing (owner-only)
+    /// @dev onlyOwner wrapper around DexRegistry._setDex. Keeps access control in one place
+    /// @dev and avoids inverting the inheritance hierarchy (registry sits below onlyOwner).
+    /// @param dexId Registry id (> 0; id 0 is reserved for the router's immutable factory)
+    /// @param factory_ Uniswap-V2-style factory for this DEX (must be non-zero)
+    /// @param feeBps Flat per-hop fee in basis points out of 10000 (<= MAX_FEE_BPS)
+    /// @param enabled Whether the DEX may be used immediately
+    /// @custom:security Reverts DexAlreadyReserved (id 0), InvalidDexFactory (zero factory),
+    /// @custom:security InvalidFee (feeBps > MAX_FEE_BPS). Emits DexRegistered.
+    function setDex(
+        uint16 dexId,
+        address factory_,
+        uint16 feeBps,
+        bool enabled
+    ) external onlyOwner {
+        _setDex(dexId, factory_, feeBps, enabled);
     }
 
     /// @notice Configure MEV protection parameters (Issue #9)

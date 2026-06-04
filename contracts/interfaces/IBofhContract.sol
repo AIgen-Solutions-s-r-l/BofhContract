@@ -149,6 +149,12 @@ interface IBofhContract {
         external
         returns (uint256[] memory outputs);
 
+    // NOTE: The multi-DEX entrypoints (executeSwapMultiDex, the 3-arg getOptimalPathMetrics overload,
+    // getOptimalPathMetricsMultiDex) and the registry admin (setDex/getDex) are declared directly on
+    // BofhContractV2/BofhContractBase, NOT here, so this interface stays minimal and pre-existing
+    // implementors (e.g. mocks) are not forced to implement them. They are fully exposed in the
+    // contract's own ABI for callers. Add them here in a later PR if a shared interface is needed.
+
     // ============================================
     // VIEW FUNCTIONS
     // ============================================
