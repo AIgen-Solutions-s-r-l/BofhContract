@@ -415,6 +415,37 @@ describe("BofhContractV2", function () {
             ).to.be.reverted;
         });
 
+        it("Should reject maxPriceImpact of 20% (PRECISION/5) and accept 10% (PRECISION/10)", async function () {
+            // Regression (FIX C): updateRiskParams previously allowed up to PRECISION/5 (20%),
+            // but PoolLib.validateSwap reverts when maxPriceImpact > PRECISION/10 (10%), so any
+            // value in (10%,20%] bricked every swap entrypoint. The config cap is now tightened
+            // to PRECISION/10 to match execution.
+            const { bofh, owner } = await loadFixture(deployContractsFixture);
+
+            // 20% (PRECISION/5) must now revert with the dedicated message.
+            await expect(
+                bofh.connect(owner).updateRiskParams(
+                    ethers.parseEther("10000"),
+                    ethers.parseEther("1"),
+                    PRECISION / 5n, // 20% - above the 10% execution cap
+                    50n
+                )
+            ).to.be.revertedWith("Price impact too high");
+
+            // 10% (PRECISION/10) is exactly the cap and must succeed.
+            await expect(
+                bofh.connect(owner).updateRiskParams(
+                    ethers.parseEther("10000"),
+                    ethers.parseEther("1"),
+                    PRECISION / 10n, // 10% - at the cap
+                    50n
+                )
+            ).to.emit(bofh, "RiskParamsUpdated");
+
+            const riskParams = await bofh.getRiskParameters();
+            expect(riskParams[2]).to.equal(PRECISION / 10n);
+        });
+
         it("Should allow blacklisting pools", async function () {
             const { bofh, pairBaseA, owner } = await loadFixture(deployContractsFixture);
 

@@ -38,7 +38,7 @@ async function main() {
   const RISK_TIERS = {
     mainnet: { maxTradeVolume: '100',   minPoolLiquidity: '50',  maxPriceImpact: '0.05', sandwichProtectionBips: 25,  label: 'PRODUCTION (conservative)' },
     testnet: { maxTradeVolume: '1000',  minPoolLiquidity: '100', maxPriceImpact: '0.10', sandwichProtectionBips: 50,  label: 'TESTNET (moderate)' },
-    local:   { maxTradeVolume: '10000', minPoolLiquidity: '10',  maxPriceImpact: '0.20', sandwichProtectionBips: 100, label: 'LOCAL (permissive for testing)' }
+    local:   { maxTradeVolume: '10000', minPoolLiquidity: '10',  maxPriceImpact: '0.10', sandwichProtectionBips: 100, label: 'LOCAL (permissive for testing)' }
   };
 
   const tierName = isLocalNetwork(networkName)

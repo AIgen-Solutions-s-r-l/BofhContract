@@ -59,6 +59,13 @@ contract BofhContractV2 is BofhContractBase, IBofhContract {
     /// @notice Thrown when factory address is zero (constructor validation)
     error InvalidFactory();
 
+    /// @notice Thrown when a swap hop would route through a blacklisted pool
+    /// @dev Distinct from the PoolBlacklisted EVENT (admin toggle). Enforced at pair resolution in
+    /// @dev executePathStep so it covers ALL swap paths: executeSwap, executeSwapMultiDex,
+    /// @dev executeMultiSwap, and executeBatchSwaps.
+    /// @param pool The blacklisted pair address that blocked the hop
+    error PoolIsBlacklisted(address pool);
+
     // Additional errors inherited from IBofhContract interface:
     // TransferFailed, UnprofitableExecution
 
@@ -519,12 +526,20 @@ contract BofhContractV2 is BofhContractBase, IBofhContract {
         address pairFactory,
         bool fotSafe
     ) private returns (SwapState memory) {
-        // Delegate the per-hop mechanics (pair resolution, pool analysis/validation, pricing, pre-fund,
-        // swap, balanceOf-delta sizing) to SwapMathLib.executeHop. It is `internal` (inlined), so the
+        // Resolve the pair ONCE here so the blacklist is enforced for EVERY swap path (legacy
+        // executeSwap, executeSwapMultiDex, executeMultiSwap, executeBatchSwaps all route through
+        // this helper). blacklistedPools is set by setPoolBlacklist; previously it was only read by
+        // the isPoolBlacklisted getter and never enforced in execution. The resolved pair is passed
+        // into executeHopWithPair so there is no redundant getPair call.
+        address pairAddress = SwapMathLib.getPairFrom(pairFactory, tokenIn, tokenOut);
+        if (blacklistedPools[pairAddress]) revert PoolIsBlacklisted(pairAddress);
+
+        // Delegate the per-hop mechanics (pool analysis/validation, pricing, pre-fund, swap,
+        // balanceOf-delta sizing) to SwapMathLib.executeHopWithPair. It is `internal` (inlined), so the
         // token-flow order, the CPMM-with-fee formula, and gas are byte-identical to the prior in-line
         // implementation. The contract retains the SwapState struct and only writes back the results.
-        (state.currentAmount, state.cumulativeImpact) = SwapMathLib.executeHop(
-            pairFactory,
+        (state.currentAmount, state.cumulativeImpact) = SwapMathLib.executeHopWithPair(
+            pairAddress,
             tokenIn,
             tokenOut,
             feeBps,
@@ -556,8 +571,12 @@ contract BofhContractV2 is BofhContractBase, IBofhContract {
         uint256 priceImpact,
         uint256 optimalityScore
     ) {
+        // Read-only reentrancy guard (FIX D): revert if a swap is mid-flight so a mid-swap quote
+        // (inconsistent intra-path reserves) can never be fed to an off-chain consumer.
+        SecurityLib.checkNotLocked(securityState);
+
         if (path.length < 2 || path.length > MAX_PATH_LENGTH) revert InvalidPath();
-        
+
         uint256 pathLength = path.length - 1;
         uint256 cumulativeImpact = 0;
         expectedOutput = amounts[0];
@@ -607,6 +626,10 @@ contract BofhContractV2 is BofhContractBase, IBofhContract {
         uint256 priceImpact,
         uint256 optimalityScore
     ) {
+        // Read-only reentrancy guard (FIX D): revert if a swap is mid-flight so a mid-swap quote
+        // (inconsistent intra-path reserves) can never be fed to an off-chain consumer.
+        SecurityLib.checkNotLocked(securityState);
+
         if (path.length < 2 || path.length > MAX_PATH_LENGTH) revert InvalidPath();
         if (fees.length != path.length - 1) revert InvalidArrayLength();
 
@@ -639,6 +662,10 @@ contract BofhContractV2 is BofhContractBase, IBofhContract {
         uint256 priceImpact,
         uint256 optimalityScore
     ) {
+        // Read-only reentrancy guard (FIX D): revert if a swap is mid-flight so a mid-swap quote
+        // (inconsistent intra-path reserves) can never be fed to an off-chain consumer.
+        SecurityLib.checkNotLocked(securityState);
+
         if (path.length < 2 || path.length > MAX_PATH_LENGTH) revert InvalidPath();
         if (fees.length != path.length - 1) revert InvalidArrayLength();
         if (dexIds.length != path.length - 1) revert InvalidArrayLength();

@@ -180,13 +180,54 @@ library SwapMathLib {
         uint256 maxSlippageParam,
         bool fotSafe
     ) internal returns (uint256 amountOut, uint256 newCumulativeImpact) {
+        // Resolve the pair from the supplied factory (DEX-specific) and delegate to the pre-resolved
+        // overload. Callers that already resolved the pair (e.g. to run a blacklist check) should use
+        // executeHopWithPair directly to avoid a redundant getPair call.
+        return executeHopWithPair(
+            getPairFrom(pairFactory, tokenIn, tokenOut),
+            tokenIn,
+            tokenOut,
+            feeBps,
+            amountIn,
+            cumulativeImpact,
+            maxPriceImpactParam,
+            maxSlippageParam,
+            fotSafe
+        );
+    }
+
+    /// @notice Execute a single swap hop against an ALREADY-RESOLVED pair (no getPair call)
+    /// @dev Identical mechanics to executeHop but takes the pair address directly. Lets the caller
+    /// @dev resolve the pair once (e.g. for a blacklist check) and pass it in, avoiding a second
+    /// @dev getPair. Token-flow, pricing, and gas are byte-identical to the factory-based path for
+    /// @dev the same pair.
+    /// @param pairAddress Pre-resolved pair contract address for this hop
+    /// @param tokenIn Input token for this hop
+    /// @param tokenOut Output token for this hop
+    /// @param feeBps Per-hop fee in basis points (caller-validated; re-checked here for defense-in-depth)
+    /// @param amountIn Current input amount for this hop
+    /// @param cumulativeImpact Running cumulative price impact (in)
+    /// @param maxPriceImpactParam Pool-validation max price impact (BofhContractBase.maxPriceImpact)
+    /// @param maxSlippageParam Max slippage for pool validation (BofhContractBase.MAX_SLIPPAGE)
+    /// @param fotSafe When false uses the legacy pre-fund order; when true sizes output on the amount
+    /// @param fotSafe the PAIR actually receives (FoT-safe). For non-FoT tokens both are identical.
+    /// @return amountOut Output amount produced by this hop (balanceOf delta)
+    /// @return newCumulativeImpact Updated cumulative price impact
+    function executeHopWithPair(
+        address pairAddress,
+        address tokenIn,
+        address tokenOut,
+        uint256 feeBps,
+        uint256 amountIn,
+        uint256 cumulativeImpact,
+        uint256 maxPriceImpactParam,
+        uint256 maxSlippageParam,
+        bool fotSafe
+    ) internal returns (uint256 amountOut, uint256 newCumulativeImpact) {
         // Defense-in-depth: the pricing computes (10000 - feeBps). Callers reach this helper only via
         // validated entrypoints (fees[i] <= MAX_FEE_BPS), but re-check so the subtraction can never
         // underflow if a future caller forgets.
         if (feeBps > MAX_FEE_BPS) revert IBofhContract.InvalidFee();
-
-        // Get the pair address for these two tokens from the supplied factory (DEX-specific)
-        address pairAddress = getPairFrom(pairFactory, tokenIn, tokenOut);
 
         // Analyze pool state using the pair address
         PoolLib.PoolState memory pool = PoolLib.analyzePool(

@@ -289,6 +289,50 @@ describe('Emergency Token Recovery', function () {
         );
     });
 
+    it('should recover a non-standard token whose transfer() returns NO data (USDT/BSC-USD style)', async function () {
+      // Regression (FIX A): require(IBEP20(token).transfer(...)) reverts for zero-returndata
+      // tokens, permanently locking exactly the token class the swap path handles tolerantly.
+      // SwapMathLib.safeTransfer must succeed here.
+      const contractAddress = await bofhContract.getAddress();
+      const recipientAddress = recipient.address;
+      const recoveryAmount = ethers.parseEther('100');
+
+      const MockNoReturnToken = await ethers.getContractFactory('MockNoReturnToken');
+      const noReturnToken = await MockNoReturnToken.deploy(
+        'No Return USDT',
+        'USDT',
+        ethers.parseEther('1000000')
+      );
+      await noReturnToken.waitForDeployment();
+      const tokenAddress = await noReturnToken.getAddress();
+
+      // Transfer no-return tokens into the contract (simulate stuck tokens).
+      await noReturnToken.transfer(contractAddress, recoveryAmount);
+      expect(await noReturnToken.balanceOf(contractAddress)).to.equal(recoveryAmount);
+
+      // Pause for emergency recovery.
+      await bofhContract.emergencyPause();
+
+      const recipientBalanceBefore = await noReturnToken.balanceOf(recipientAddress);
+
+      // Recovery must SUCCEED (not revert) and emit the event for the non-standard token.
+      await expect(
+        bofhContract.emergencyTokenRecovery(
+          tokenAddress,
+          recipientAddress,
+          recoveryAmount
+        )
+      )
+        .to.emit(bofhContract, 'EmergencyTokenRecovery')
+        .withArgs(tokenAddress, recipientAddress, recoveryAmount, owner.address);
+
+      // Tokens actually moved to the recipient and the contract was drained.
+      expect(await noReturnToken.balanceOf(recipientAddress)).to.equal(
+        recipientBalanceBefore + recoveryAmount
+      );
+      expect(await noReturnToken.balanceOf(contractAddress)).to.equal(0);
+    });
+
     it('should not allow recovery after unpausing the contract', async function () {
       const contractAddress = await bofhContract.getAddress();
       const tokenAddress = await mockToken.getAddress();
