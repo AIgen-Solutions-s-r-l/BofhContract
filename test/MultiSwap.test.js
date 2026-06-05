@@ -94,7 +94,7 @@ describe("Multi-Swap Execution Tests", function () {
         [await baseToken.getAddress(), await tokenA.getAddress(), await baseToken.getAddress()],
         [await baseToken.getAddress(), await tokenB.getAddress(), await baseToken.getAddress()]
       ];
-      const fees = [[3000, 3000], [3000, 3000]];
+      const fees = [[30, 30], [30, 30]];
       const amounts = [ethers.parseEther("1"), ethers.parseEther("1")];
       const minAmounts = [ethers.parseEther("0.1"), ethers.parseEther("0.1")];
       const deadline = Math.floor(Date.now() / 1000) + 3600;
@@ -113,7 +113,7 @@ describe("Multi-Swap Execution Tests", function () {
         [await baseToken.getAddress(), await tokenB.getAddress(), await baseToken.getAddress()],
         [await baseToken.getAddress(), await tokenC.getAddress(), await baseToken.getAddress()]
       ];
-      const fees = [[3000, 3000], [3000, 3000], [3000, 3000]];
+      const fees = [[30, 30], [30, 30], [30, 30]];
       const amounts = [
         ethers.parseEther("1"),
         ethers.parseEther("1"),
@@ -137,7 +137,7 @@ describe("Multi-Swap Execution Tests", function () {
       const paths = [
         [await baseToken.getAddress(), await tokenA.getAddress(), await baseToken.getAddress()]
       ];
-      const fees = [[3000, 3000]];
+      const fees = [[30, 30]];
       const amounts = [ethers.parseEther("10")];
       const minAmounts = [ethers.parseEther("1")];
       const deadline = Math.floor(Date.now() / 1000) + 3600;
@@ -165,7 +165,7 @@ describe("Multi-Swap Execution Tests", function () {
       const paths = [
         [await baseToken.getAddress(), await tokenA.getAddress(), await baseToken.getAddress()]
       ];
-      const fees = [[3000, 3000], [3000, 3000]]; // Wrong length
+      const fees = [[30, 30], [30, 30]]; // Wrong length
       const amounts = [ethers.parseEther("10")];
       const minAmounts = [ethers.parseEther("1")];
       const deadline = Math.floor(Date.now() / 1000) + 3600;
@@ -181,7 +181,7 @@ describe("Multi-Swap Execution Tests", function () {
       const paths = [
         [await baseToken.getAddress(), await tokenA.getAddress(), await baseToken.getAddress()]
       ];
-      const fees = [[3000, 3000]];
+      const fees = [[30, 30]];
       const amounts = [ethers.parseEther("10"), ethers.parseEther("10")]; // Wrong length
       const minAmounts = [ethers.parseEther("1")];
       const deadline = Math.floor(Date.now() / 1000) + 3600;
@@ -197,7 +197,7 @@ describe("Multi-Swap Execution Tests", function () {
       const paths = [
         [await baseToken.getAddress(), await tokenA.getAddress(), await baseToken.getAddress()]
       ];
-      const fees = [[3000, 3000]];
+      const fees = [[30, 30]];
       const amounts = [ethers.parseEther("10")];
       const minAmounts = [ethers.parseEther("1"), ethers.parseEther("1")]; // Wrong length
       const deadline = Math.floor(Date.now() / 1000) + 3600;
@@ -213,7 +213,7 @@ describe("Multi-Swap Execution Tests", function () {
       const paths = [
         [await baseToken.getAddress(), await tokenA.getAddress(), await baseToken.getAddress()]
       ];
-      const fees = [[3000, 3000]];
+      const fees = [[30, 30]];
       const amounts = [ethers.parseEther("10")];
       const minAmounts = [ethers.parseEther("1")];
       const pastDeadline = Math.floor(Date.now() / 1000) - 100;
@@ -229,7 +229,7 @@ describe("Multi-Swap Execution Tests", function () {
       const paths = [
         [await baseToken.getAddress(), await tokenA.getAddress(), await baseToken.getAddress()]
       ];
-      const fees = [[3000, 3000]];
+      const fees = [[30, 30]];
       const amounts = [ethers.parseEther("10")];
       const minAmounts = [ethers.parseEther("1")];
 
@@ -250,8 +250,8 @@ describe("Multi-Swap Execution Tests", function () {
         [await baseToken.getAddress(), await tokenA.getAddress(), await tokenB.getAddress(), await baseToken.getAddress()]
       ];
       const fees = [
-        [3000, 3000],
-        [3000, 3000, 3000]
+        [30, 30],
+        [30, 30, 30]
       ];
       const amounts = [ethers.parseEther("10"), ethers.parseEther("10")];
       const minAmounts = [ethers.parseEther("1"), ethers.parseEther("1")];

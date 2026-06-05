@@ -428,7 +428,7 @@ describe("Mock Contracts", function () {
       it("Should return default swap fee", async function () {
         const { pair } = await loadFixture(deployPairFixture);
 
-        expect(await pair.swapFee()).to.equal(3); // 0.3% default
+        expect(await pair.swapFee()).to.equal(30); // 0.3% default (30/10000)
       });
     });
 

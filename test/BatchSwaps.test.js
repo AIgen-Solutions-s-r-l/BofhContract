@@ -130,7 +130,7 @@ describe('Batch Swap Execution Tests', function () {
         .fill(null)
         .map(() => ({
           path: [baseAddr, tokenAAddr, baseAddr],
-          fees: [300, 300],
+          fees: [30, 30],
           amountIn: ethers.parseEther('10'),
           minAmountOut: ethers.parseEther('9'),
           deadline: deadline,
@@ -150,7 +150,7 @@ describe('Batch Swap Execution Tests', function () {
       const swaps = [
         {
           path: [baseAddr, tokenAAddr, baseAddr],
-          fees: [300, 300],
+          fees: [30, 30],
           amountIn: ethers.parseEther('10'),
           minAmountOut: ethers.parseEther('9'),
           deadline: deadline,
@@ -171,7 +171,7 @@ describe('Batch Swap Execution Tests', function () {
       const swaps = [
         {
           path: [baseAddr, tokenAAddr, baseAddr],
-          fees: [300, 300],
+          fees: [30, 30],
           amountIn: ethers.parseEther('10'),
           minAmountOut: ethers.parseEther('9'),
           deadline: expiredDeadline,
@@ -192,7 +192,7 @@ describe('Batch Swap Execution Tests', function () {
       const swaps = [
         {
           path: [tokenAAddr, baseAddr], // Invalid: doesn't start with base
-          fees: [300],
+          fees: [30],
           amountIn: ethers.parseEther('10'),
           minAmountOut: ethers.parseEther('9'),
           deadline: deadline,
@@ -213,7 +213,7 @@ describe('Batch Swap Execution Tests', function () {
       const swaps = [
         {
           path: [baseAddr, tokenAAddr], // Invalid: doesn't end with base
-          fees: [300],
+          fees: [30],
           amountIn: ethers.parseEther('10'),
           minAmountOut: ethers.parseEther('9'),
           deadline: deadline,
@@ -236,7 +236,7 @@ describe('Batch Swap Execution Tests', function () {
       const swaps = [
         {
           path: [baseAddr, tokenAAddr, baseAddr],
-          fees: [300, 300],
+          fees: [30, 30],
           amountIn: ethers.parseEther('100'),
           minAmountOut: ethers.parseEther('95'),
           deadline: deadline,
@@ -264,7 +264,7 @@ describe('Batch Swap Execution Tests', function () {
       const swaps = [
         {
           path: [baseAddr, tokenAAddr, baseAddr],
-          fees: [300, 300],
+          fees: [30, 30],
           amountIn: amountIn,
           minAmountOut: ethers.parseEther('95'),
           deadline: deadline,
@@ -288,7 +288,7 @@ describe('Batch Swap Execution Tests', function () {
       const swaps = [
         {
           path: [baseAddr, tokenAAddr, baseAddr],
-          fees: [300, 300],
+          fees: [30, 30],
           amountIn: ethers.parseEther('100'),
           minAmountOut: ethers.parseEther('95'),
           deadline: deadline,
@@ -296,7 +296,7 @@ describe('Batch Swap Execution Tests', function () {
         },
         {
           path: [baseAddr, tokenBAddr, baseAddr],
-          fees: [300, 300],
+          fees: [30, 30],
           amountIn: ethers.parseEther('100'),
           minAmountOut: ethers.parseEther('95'),
           deadline: deadline,
@@ -333,7 +333,7 @@ describe('Batch Swap Execution Tests', function () {
       const swaps = [
         {
           path: [baseAddr, tokenAAddr, baseAddr],
-          fees: [300, 300],
+          fees: [30, 30],
           amountIn: ethers.parseEther('100'),
           minAmountOut: ethers.parseEther('95'),
           deadline: deadline,
@@ -341,7 +341,7 @@ describe('Batch Swap Execution Tests', function () {
         },
         {
           path: [baseAddr, tokenBAddr, baseAddr],
-          fees: [300, 300],
+          fees: [30, 30],
           amountIn: ethers.parseEther('100'),
           minAmountOut: ethers.parseEther('95'),
           deadline: deadline,
@@ -349,7 +349,7 @@ describe('Batch Swap Execution Tests', function () {
         },
         {
           path: [baseAddr, tokenCAddr, baseAddr],
-          fees: [300, 300],
+          fees: [30, 30],
           amountIn: ethers.parseEther('100'),
           minAmountOut: ethers.parseEther('95'),
           deadline: deadline,
@@ -384,7 +384,7 @@ describe('Batch Swap Execution Tests', function () {
         .fill(null)
         .map(() => ({
           path: [baseAddr, tokenAAddr, baseAddr],
-          fees: [300, 300],
+          fees: [30, 30],
           amountIn: ethers.parseEther('10'),
           minAmountOut: ethers.parseEther('9'),
           deadline: deadline,
@@ -424,7 +424,7 @@ describe('Batch Swap Execution Tests', function () {
       const swaps = [
         {
           path: [baseAddr, tokenAAddr, baseAddr],
-          fees: [300, 300],
+          fees: [30, 30],
           amountIn: ethers.parseEther('100'),
           minAmountOut: ethers.parseEther('95'),
           deadline: deadline,
@@ -432,7 +432,7 @@ describe('Batch Swap Execution Tests', function () {
         },
         {
           path: [baseAddr, tokenBAddr, baseAddr],
-          fees: [300, 300],
+          fees: [30, 30],
           amountIn: ethers.parseEther('100'),
           minAmountOut: ethers.parseEther('999999'), // Impossible to achieve
           deadline: deadline,
@@ -463,7 +463,7 @@ describe('Batch Swap Execution Tests', function () {
       const swaps = [
         {
           path: [baseAddr, tokenAAddr, baseAddr],
-          fees: [300, 300],
+          fees: [30, 30],
           amountIn: ethers.parseEther('100'),
           minAmountOut: ethers.parseEther('95'),
           deadline: validDeadline,
@@ -471,7 +471,7 @@ describe('Batch Swap Execution Tests', function () {
         },
         {
           path: [baseAddr, tokenBAddr, baseAddr],
-          fees: [300, 300],
+          fees: [30, 30],
           amountIn: ethers.parseEther('100'),
           minAmountOut: ethers.parseEther('95'),
           deadline: expiredDeadline, // Expired
@@ -494,7 +494,7 @@ describe('Batch Swap Execution Tests', function () {
       const swaps = [
         {
           path: [baseAddr, tokenAAddr, baseAddr],
-          fees: [300, 300],
+          fees: [30, 30],
           amountIn: ethers.parseEther('100'),
           minAmountOut: ethers.parseEther('95'),
           deadline: deadline,
@@ -517,7 +517,7 @@ describe('Batch Swap Execution Tests', function () {
       const swaps = [
         {
           path: [baseAddr, tokenAAddr, baseAddr],
-          fees: [300, 300],
+          fees: [30, 30],
           amountIn: ethers.parseEther('100'),
           minAmountOut: ethers.parseEther('95'),
           deadline: deadline,
@@ -525,7 +525,7 @@ describe('Batch Swap Execution Tests', function () {
         },
         {
           path: [baseAddr, tokenBAddr, baseAddr],
-          fees: [300, 300],
+          fees: [30, 30],
           amountIn: ethers.parseEther('100'),
           minAmountOut: ethers.parseEther('95'),
           deadline: deadline,
@@ -548,7 +548,7 @@ describe('Batch Swap Execution Tests', function () {
         .fill(null)
         .map(() => ({
           path: [baseAddr, tokenAAddr, baseAddr],
-          fees: [300, 300],
+          fees: [30, 30],
           amountIn: ethers.parseEther('10'),
           minAmountOut: ethers.parseEther('9'),
           deadline: deadline,
@@ -577,7 +577,7 @@ describe('Batch Swap Execution Tests', function () {
       const swaps = [
         {
           path: [baseAddr, tokenAAddr, baseAddr],
-          fees: [300, 300],
+          fees: [30, 30],
           amountIn: ethers.parseEther('100'),
           minAmountOut: ethers.parseEther('95'),
           deadline: deadline,
@@ -622,7 +622,7 @@ describe('Batch Swap Execution Tests', function () {
         {
           // 2-hop path
           path: [baseAddr, tokenAAddr, baseAddr],
-          fees: [300, 300],
+          fees: [30, 30],
           amountIn: ethers.parseEther('100'),
           minAmountOut: ethers.parseEther('95'),
           deadline: deadline,
@@ -631,7 +631,7 @@ describe('Batch Swap Execution Tests', function () {
         {
           // 3-hop path
           path: [baseAddr, tokenAAddr, tokenBAddr, baseAddr],
-          fees: [300, 300, 300],
+          fees: [30, 30, 30],
           amountIn: ethers.parseEther('100'),
           minAmountOut: ethers.parseEther('90'),
           deadline: deadline,

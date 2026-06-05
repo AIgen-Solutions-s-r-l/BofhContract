@@ -132,7 +132,7 @@ describe("Swap Execution Tests", function () {
       const { bofh, baseToken, tokenA, user1, pairBaseA } = await loadFixture(deployContractsFixture);
 
       const path = [await baseToken.getAddress(), await tokenA.getAddress(), await baseToken.getAddress()];
-      const fees = [3000, 3000]; // 0.3% fee for each swap
+      const fees = [30, 30]; // 0.3% fee for each swap
       const amountIn = ethers.parseEther("10");
       const minAmountOut = ethers.parseEther("1"); // Conservative minimum (swaps optimize for best output)
       const deadline = Math.floor(Date.now() / 1000) + 3600;
@@ -160,7 +160,7 @@ describe("Swap Execution Tests", function () {
       const { bofh, baseToken, tokenA, user1 } = await loadFixture(deployContractsFixture);
 
       const path = [await baseToken.getAddress(), await tokenA.getAddress(), await baseToken.getAddress()];
-      const fees = [3000, 3000];
+      const fees = [30, 30];
       const amountIn = ethers.parseEther("10");
       const minAmountOut = ethers.parseEther("100"); // Unrealistic expectation
       const deadline = Math.floor(Date.now() / 1000) + 3600;
@@ -174,7 +174,7 @@ describe("Swap Execution Tests", function () {
       const { bofh, baseToken, tokenA, user1 } = await loadFixture(deployContractsFixture);
 
       const path = [await baseToken.getAddress(), await tokenA.getAddress(), await baseToken.getAddress()];
-      const fees = [3000, 3000];
+      const fees = [30, 30];
       const amountIn = ethers.parseEther("10");
       const minAmountOut = ethers.parseEther("1");
       const deadline = Math.floor(Date.now() / 1000) + 3600;
@@ -195,7 +195,7 @@ describe("Swap Execution Tests", function () {
         await tokenB.getAddress(),
         await baseToken.getAddress()
       ];
-      const fees = [3000, 3000, 3000];
+      const fees = [30, 30, 30];
       const amountIn = ethers.parseEther("10");
       const minAmountOut = ethers.parseEther("9");
       const deadline = Math.floor(Date.now() / 1000) + 3600;
@@ -214,7 +214,7 @@ describe("Swap Execution Tests", function () {
         await tokenB.getAddress(),
         await baseToken.getAddress()
       ];
-      const fees = [3000, 3000, 3000];
+      const fees = [30, 30, 30];
       const amountIn = ethers.parseEther("10");
       const minAmountOut = ethers.parseEther("1");
       const deadline = Math.floor(Date.now() / 1000) + 3600;
@@ -247,7 +247,7 @@ describe("Swap Execution Tests", function () {
         await tokenC.getAddress(),
         await baseToken.getAddress()
       ];
-      const fees = [3000, 3000, 3000, 3000];
+      const fees = [30, 30, 30, 30];
       const amountIn = ethers.parseEther("20");
       const minAmountOut = ethers.parseEther("15");
       const deadline = Math.floor(Date.now() / 1000) + 3600;
@@ -267,7 +267,7 @@ describe("Swap Execution Tests", function () {
         await tokenC.getAddress(),
         await baseToken.getAddress()
       ];
-      const fees = [3000, 3000, 3000, 3000];
+      const fees = [30, 30, 30, 30];
       const amountIn = ethers.parseEther("100");
       const minAmountOut = ethers.parseEther("1");
       const deadline = Math.floor(Date.now() / 1000) + 3600;
@@ -292,7 +292,7 @@ describe("Swap Execution Tests", function () {
         await tokenC.getAddress(),
         await baseToken.getAddress()
       ];
-      const fees = [3000, 3000, 3000, 3000];
+      const fees = [30, 30, 30, 30];
       const amountIn = ethers.parseEther("10");
       const minAmountOut = ethers.parseEther("1");
       const deadline = Math.floor(Date.now() / 1000) + 3600;
@@ -315,7 +315,7 @@ describe("Swap Execution Tests", function () {
         await tokenD.getAddress(),
         await baseToken.getAddress()
       ];
-      const fees = [3000, 3000, 3000, 3000, 3000];
+      const fees = [30, 30, 30, 30, 30];
       const amountIn = ethers.parseEther("50");
       const minAmountOut = ethers.parseEther("1");
       const deadline = Math.floor(Date.now() / 1000) + 3600;
@@ -336,7 +336,7 @@ describe("Swap Execution Tests", function () {
         await tokenD.getAddress(),
         await baseToken.getAddress()
       ];
-      const fees = [3000, 3000, 3000, 3000, 3000];
+      const fees = [30, 30, 30, 30, 30];
       const amountIn = ethers.parseEther("100");
       const minAmountOut = ethers.parseEther("1");
       const deadline = Math.floor(Date.now() / 1000) + 3600;
@@ -358,7 +358,7 @@ describe("Swap Execution Tests", function () {
         await tokenB.getAddress(),
         await baseToken.getAddress()
       ];
-      const fees = [3000, 3000, 3000];
+      const fees = [30, 30, 30];
       const amountIn = ethers.parseEther("10");
       const minAmountOut = ethers.parseEther("1");
       const deadline = Math.floor(Date.now() / 1000) + 3600;
@@ -375,7 +375,7 @@ describe("Swap Execution Tests", function () {
 
       // 2-way swap
       const path2 = [await baseToken.getAddress(), await tokenA.getAddress(), await baseToken.getAddress()];
-      const fees2 = [3000, 3000];
+      const fees2 = [30, 30];
       const tx2 = await bofh.connect(user1).executeSwap(
         path2,
         fees2,
@@ -395,7 +395,7 @@ describe("Swap Execution Tests", function () {
         await tokenD.getAddress(),
         await baseToken.getAddress()
       ];
-      const fees5 = [3000, 3000, 3000, 3000, 3000];
+      const fees5 = [30, 30, 30, 30, 30];
       const tx5 = await bofh.connect(user1).executeSwap(
         path5,
         fees5,
@@ -428,7 +428,7 @@ describe("Swap Execution Tests", function () {
         await tokenB.getAddress(),
         await baseToken.getAddress()
       ];
-      const fees = [3000, 3000, 3000];
+      const fees = [30, 30, 30];
       const amountIn = ethers.parseEther("100"); // Large amount for high impact
       const minAmountOut = ethers.parseEther("1");
       const deadline = Math.floor(Date.now() / 1000) + 3600;

@@ -191,7 +191,7 @@ describe("BofhContractV2", function () {
             await expect(
                 bofh.connect(user1).executeSwap(
                     [],
-                    [3000n, 3000n],
+                    [30n, 30n],
                     SWAP_AMOUNT,
                     MIN_OUT,
                     deadline
@@ -212,7 +212,7 @@ describe("BofhContractV2", function () {
             await expect(
                 bofh.connect(user1).executeSwap(
                     path,
-                    [3000n], // Wrong length - should be path.length - 1
+                    [30n], // Wrong length - should be path.length - 1
                     SWAP_AMOUNT,
                     MIN_OUT,
                     deadline
@@ -233,7 +233,7 @@ describe("BofhContractV2", function () {
             await expect(
                 bofh.connect(user1).executeSwap(
                     path,
-                    [3000n, 3000n],
+                    [30n, 30n],
                     0n,
                     MIN_OUT,
                     deadline
@@ -254,7 +254,7 @@ describe("BofhContractV2", function () {
             await expect(
                 bofh.connect(user1).executeSwap(
                     path,
-                    [3000n, 3000n],
+                    [30n, 30n],
                     SWAP_AMOUNT,
                     0n,
                     deadline
@@ -275,7 +275,7 @@ describe("BofhContractV2", function () {
             await expect(
                 bofh.connect(user1).executeSwap(
                     path,
-                    [3000n, 3000n],
+                    [30n, 30n],
                     SWAP_AMOUNT,
                     MIN_OUT,
                     pastDeadline
@@ -296,7 +296,7 @@ describe("BofhContractV2", function () {
             await expect(
                 bofh.connect(user1).executeSwap(
                     path,
-                    [3000n, 3000n],
+                    [30n, 30n],
                     SWAP_AMOUNT,
                     MIN_OUT,
                     deadline
@@ -317,7 +317,7 @@ describe("BofhContractV2", function () {
             await expect(
                 bofh.connect(user1).executeSwap(
                     path,
-                    [3000n, 3000n],
+                    [30n, 30n],
                     SWAP_AMOUNT,
                     MIN_OUT,
                     deadline
@@ -338,7 +338,7 @@ describe("BofhContractV2", function () {
             await expect(
                 bofh.connect(user1).executeSwap(
                     path,
-                    [10001n, 3000n], // > 100% fee
+                    [1001n, 30n], // > MAX_FEE_BPS (1000 = 10%) -> InvalidFee
                     SWAP_AMOUNT,
                     MIN_OUT,
                     deadline
@@ -363,7 +363,7 @@ describe("BofhContractV2", function () {
             await expect(
                 bofh.connect(user1).executeSwap(
                     path,
-                    [3000n, 3000n, 3000n, 3000n, 3000n],
+                    [30n, 30n, 30n, 30n, 30n],
                     SWAP_AMOUNT,
                     MIN_OUT,
                     deadline
@@ -458,7 +458,7 @@ describe("BofhContractV2", function () {
             await expect(
                 bofh.connect(user1).executeSwap(
                     path,
-                    [3000n, 3000n],
+                    [30n, 30n],
                     SWAP_AMOUNT,
                     MIN_OUT,
                     pastDeadline
@@ -503,7 +503,7 @@ describe("BofhContractV2", function () {
             await expect(
                 bofh.connect(user1).executeSwap(
                     path,
-                    [3000n, 3000n],
+                    [30n, 30n],
                     SWAP_AMOUNT,
                     MIN_OUT,
                     deadline

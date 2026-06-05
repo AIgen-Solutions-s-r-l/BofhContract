@@ -11,8 +11,8 @@ contract MockPair {
     uint32 private blockTimestampLast;
     
     uint256 private constant MINIMUM_LIQUIDITY = 1000;
-    uint256 private constant FEE_DENOMINATOR = 1000;
-    uint256 public swapFee = 3; // 0.3%
+    uint256 private constant FEE_DENOMINATOR = 10000;
+    uint256 public swapFee = 30; // 0.3% (30/10000); set via setSwapFee for other DEX fees
     
     event Mint(address indexed sender, uint256 amount0, uint256 amount1);
     event Burn(address indexed sender, uint256 amount0, uint256 amount1, address indexed to);
@@ -45,7 +45,14 @@ contract MockPair {
         _reserve1 = reserve1;
         _blockTimestampLast = blockTimestampLast;
     }
-    
+
+    /// @notice Set the swap fee in basis points out of FEE_DENOMINATOR (10000)
+    /// @dev Test helper to emulate DEXes with different fees (25 = 0.25%, 30 = 0.3%, 50 = 0.5%)
+    /// @param _fee Fee in basis points out of 10000
+    function setSwapFee(uint256 _fee) external {
+        swapFee = _fee;
+    }
+
     function mint(address to) external returns (uint256 liquidity) {
         (uint112 _reserve0, uint112 _reserve1,) = getReserves();
         uint256 balance0 = MockToken(token0).balanceOf(address(this));

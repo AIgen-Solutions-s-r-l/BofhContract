@@ -21,8 +21,10 @@ contract BofhContractV2 is BofhContractBase, IBofhContract {
     /// @notice Uniswap V2-style factory address for pair lookups
     address private immutable factory;
 
-    /// @notice Maximum allowed fee in basis points (100% = 10000 bps)
-    uint256 private constant MAX_FEE_BPS = 10000;
+    /// @notice Maximum allowed per-hop fee in basis points out of 10000 (10% = 1000 bps)
+    /// @dev Tightened from 10000 (100%) to 1000 (10%): rejects absurd fees while still covering
+    /// @dev real-world DEX forks. Per-fee validation in _validateSwapInputs enforces this cap.
+    uint256 private constant MAX_FEE_BPS = 1000;
 
     /// @notice Internal state tracking for multi-step swap execution
     /// @dev Minimal state for tracking swap progress across multiple hops
@@ -66,7 +68,7 @@ contract BofhContractV2 is BofhContractBase, IBofhContract {
     /// @notice Validate all swap parameters before execution
     /// @dev Comprehensive validation: deadline, array lengths, amounts, addresses, path structure, fees
     /// @dev Validates: 1) Deadline not expired, 2) Arrays correct length, 3) Amounts > 0,
-    /// @dev 4) Addresses non-zero, 5) Path starts/ends with baseToken, 6) Fees ≤ 100%
+    /// @dev 4) Addresses non-zero, 5) Path starts/ends with baseToken, 6) Fees ≤ MAX_FEE_BPS (10%)
     /// @param path Token swap path (must start and end with baseToken)
     /// @param fees Fee array in basis points (length = path.length - 1)
     /// @param amountIn Input amount (must be > 0)
@@ -106,7 +108,7 @@ contract BofhContractV2 is BofhContractBase, IBofhContract {
         address cachedBaseToken = baseToken;
         if (path[0] != cachedBaseToken || path[pathLength - 1] != cachedBaseToken) revert InvalidPath();
 
-        // 6. Fee validation (fees must be reasonable, max 100% = 10000 bps)
+        // 6. Fee validation (fees must be reasonable, max MAX_FEE_BPS = 1000 bps = 10%)
         for (uint256 i = 0; i < fees.length;) {
             if (fees[i] > MAX_FEE_BPS) revert InvalidFee();
             unchecked { ++i; }
@@ -182,7 +184,8 @@ contract BofhContractV2 is BofhContractBase, IBofhContract {
             state = executePathStep(
                 state,
                 path[i],
-                path[i + 1]
+                path[i + 1],
+                fees[i]
             );
 
             unchecked {
@@ -365,14 +368,23 @@ contract BofhContractV2 is BofhContractBase, IBofhContract {
     /// @param state Current swap state (token, amount, impact)
     /// @param tokenIn Input token address for this step
     /// @param tokenOut Output token address for this step
+    /// @param feeBps Per-hop swap fee in basis points out of 10000 (e.g. 30 = 0.3%, 25 = 0.25%)
     /// @return Updated swap state with new currentAmount and cumulativeImpact
     /// @custom:security Validates pool liquidity and calculates price impact before swap
-    /// @custom:optimization Removed unused parameters (fee, stepIndex, pathLength) for gas savings
+    /// @custom:optimization Removed unused parameters (stepIndex, pathLength) for gas savings
+    /// @custom:fee Consumes the caller-supplied per-hop fee so the router prices correctly on
+    /// @custom:fee DEXes with non-0.3% fees (Pancake 0.25%, Uniswap 0.3%, higher-fee forks)
     function executePathStep(
         SwapState memory state,
         address tokenIn,
-        address tokenOut
+        address tokenOut,
+        uint256 feeBps
     ) private returns (SwapState memory) {
+        // Defense-in-depth: the assembly below computes (10000 - feeBps). Callers reach this
+        // private helper only via _validateSwapInputs (which enforces fees[i] <= MAX_FEE_BPS),
+        // but re-check here so the subtraction can never underflow if a future caller forgets.
+        if (feeBps > MAX_FEE_BPS) revert InvalidFee();
+
         // Get the pair address for these two tokens
         address pairAddress = _getPair(tokenIn, tokenOut);
 
@@ -397,7 +409,9 @@ contract BofhContractV2 is BofhContractBase, IBofhContract {
         if (!PoolLib.validateSwap(pool, params)) revert InvalidSwapParameters();
 
         // Calculate expected output using constant product formula (x * y = k)
-        // amountOut = (amountIn * reserveOut * 997) / (reserveIn * 1000 + amountIn * 997)
+        // amountOut = (amountIn * reserveOut * (10000 - feeBps)) /
+        //             (reserveIn * 10000 + amountIn * (10000 - feeBps))
+        // feeBps is a 10000-basis per-hop fee (30 = 0.3%, reproducing the legacy 997/1000 result).
         // Phase 3 optimization: Assembly for maximum gas efficiency
         uint256 expectedOutput;
         assembly {
@@ -406,14 +420,17 @@ contract BofhContractV2 is BofhContractBase, IBofhContract {
             let reserveOut := mload(add(pool, 0x20)) // pool.reserveOut (2nd field after reserveIn)
             let reserveIn := mload(pool) // pool.reserveIn (1st field)
 
-            // Calculate: amountInWithFee = amountIn * 997
-            let amountInWithFee := mul(amountIn, 997)
+            // Calculate: feeNum = 10000 - feeBps (feeBps=30 -> 9970, i.e. legacy 0.3%)
+            let feeNum := sub(10000, feeBps)
+
+            // Calculate: amountInWithFee = amountIn * feeNum
+            let amountInWithFee := mul(amountIn, feeNum)
 
             // Calculate: numerator = amountInWithFee * reserveOut
             let numerator := mul(amountInWithFee, reserveOut)
 
-            // Calculate: denominator = reserveIn * 1000 + amountInWithFee
-            let denominator := add(mul(reserveIn, 1000), amountInWithFee)
+            // Calculate: denominator = reserveIn * 10000 + amountInWithFee
+            let denominator := add(mul(reserveIn, 10000), amountInWithFee)
 
             // Calculate: expectedOutput = numerator / denominator
             expectedOutput := div(numerator, denominator)
