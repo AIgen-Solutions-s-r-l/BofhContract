@@ -58,32 +58,33 @@ function loadSnapshot(arg) {
   return JSON.parse(fs.readFileSync(abs, 'utf8'));
 }
 
-function main() {
+async function main() {
   const arg = process.argv[2];
   const { config } = loadConfig();
   const snapshot = loadSnapshot(arg);
 
+  const kind = snapshot.snapshotKind === 'fresh' ? ' [FRESH-POOL]' : '';
   console.log(
     `[run] snapshot chain=${snapshot.chainKey} block=${snapshot.blockNumber} ` +
-      `pools=${(snapshot.pools || []).length} base=${snapshot.baseToken}`
+      `pools=${(snapshot.pools || []).length} base=${snapshot.baseToken}${kind}`
   );
 
   const candidates = findCandidateCycles(snapshot, config.pathfinder || {});
   console.log(`[run] candidate cycles: ${candidates.length}`);
 
   // obs left mostly empty on purpose: win-rate falls back to config, revert-rate is
-  // unmeasured (forces a provisional verdict + the revm TODO warning).
-  const result = runBacktest(snapshot, candidates, config, { windowDays: 1 });
+  // unmeasured (forces a provisional verdict + the revm TODO warning). The token-safety GATE
+  // runs offline here (no provider) → pass-through unless an injectedSafety map is provided;
+  // it becomes a hard gate the moment a provider/router is wired (see backtester.runBacktest).
+  const result = await runBacktest(snapshot, candidates, config, { windowDays: 1 });
   printReport(result);
 }
 
 if (require.main === module) {
-  try {
-    main();
-  } catch (err) {
+  main().catch((err) => {
     console.error('[run] fatal:', err.message);
     process.exitCode = 1;
-  }
+  });
 }
 
 module.exports = { demoSnapshot };
