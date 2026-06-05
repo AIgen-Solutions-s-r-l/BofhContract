@@ -4,6 +4,7 @@ pragma solidity >=0.8.10;
 import "../libs/SecurityLib.sol";
 import "../libs/MathLib.sol";
 import "../libs/PoolLib.sol";
+import "../libs/SwapMathLib.sol";
 import "../interfaces/ISwapInterfaces.sol";
 import "../interfaces/IBofhContractBase.sol";
 import "./DexRegistry.sol";
@@ -197,10 +198,10 @@ abstract contract BofhContractBase is IBofhContractBase, DexRegistry {
     }
 
     /// @notice Update risk management parameters
-    /// @dev Only callable by owner, validates maxPriceImpact ≤ 20% and sandwichProtection ≤ 1%
+    /// @dev Only callable by owner, validates maxPriceImpact ≤ 10% and sandwichProtection ≤ 1%
     /// @param _maxTradeVolume New maximum trade volume per swap
     /// @param _minPoolLiquidity New minimum required pool liquidity
-    /// @param _maxPriceImpact New maximum allowed price impact (max 20% = PRECISION/5)
+    /// @param _maxPriceImpact New maximum allowed price impact (max 10% = PRECISION/10)
     /// @param _sandwichProtectionBips New sandwich protection in basis points (max 100 = 1%)
     /// @custom:security Validates price impact and sandwich protection within safe limits
     /// @custom:security Emits RiskParamsUpdated event for off-chain tracking
@@ -210,7 +211,7 @@ abstract contract BofhContractBase is IBofhContractBase, DexRegistry {
         uint256 _maxPriceImpact,
         uint256 _sandwichProtectionBips
     ) external onlyOwner {
-        require(_maxPriceImpact <= PRECISION / 5, "Price impact too high"); // Max 20%
+        require(_maxPriceImpact <= PRECISION / 10, "Price impact too high"); // Max 10% (matches PoolLib.validateSwap)
         require(_sandwichProtectionBips <= 100, "Protection too high"); // Max 1%
         
         maxTradeVolume = _maxTradeVolume;
@@ -349,11 +350,12 @@ abstract contract BofhContractBase is IBofhContractBase, DexRegistry {
         uint256 balance = IBEP20(token).balanceOf(address(this));
         require(balance >= amount, "BofhContractBase: Insufficient token balance");
 
-        // Transfer tokens to recipient
-        require(
-            IBEP20(token).transfer(to, amount),
-            "BofhContractBase: Token transfer failed"
-        );
+        // Transfer tokens to recipient via the tolerant safe-transfer helper. Using
+        // require(transfer()) reverts for zero-returndata tokens (USDT/BSC-USD), which would
+        // permanently lock exactly the token class the swap path already handles tolerantly.
+        // SwapMathLib.safeTransfer succeeds for both bool-returning and no-return ERC20s and
+        // reverts (TransferFailed) on a failed call.
+        SwapMathLib.safeTransfer(token, to, amount);
 
         emit EmergencyTokenRecovery(token, to, amount, msg.sender);
     }

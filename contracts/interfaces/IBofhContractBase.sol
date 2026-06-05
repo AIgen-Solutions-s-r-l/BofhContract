@@ -60,10 +60,10 @@ interface IBofhContractBase {
     // ============================================
 
     /// @notice Update risk management parameters
-    /// @dev Only callable by owner, validates maxPriceImpact ≤ 20% and sandwichProtection ≤ 1%
+    /// @dev Only callable by owner, validates maxPriceImpact ≤ 10% and sandwichProtection ≤ 1%
     /// @param _maxTradeVolume New maximum trade volume per swap
     /// @param _minPoolLiquidity New minimum required pool liquidity
-    /// @param _maxPriceImpact New maximum allowed price impact (max 20%)
+    /// @param _maxPriceImpact New maximum allowed price impact (max 10%)
     /// @param _sandwichProtectionBips New sandwich protection in basis points (max 100 = 1%)
     function updateRiskParams(
         uint256 _maxTradeVolume,
