@@ -6,7 +6,7 @@ import "../interfaces/ISwapInterfaces.sol";
 
 /// @title PoolLib - Liquidity Pool Analysis and Management Library
 /// @author Bofh Team
-/// @notice Provides advanced pool state analysis, price impact calculations, and swap optimization
+/// @notice Provides pool state analysis, price impact calculations, and per-hop swap validation
 /// @dev Implements Constant Product Market Maker (CPMM) analysis with volatility tracking
 /// @custom:security All functions validate pool liquidity and price impact constraints
 library PoolLib {
@@ -206,43 +206,6 @@ library PoolLib {
         uint256 decay = MathLib.exp2(PRECISION * timeDelta / 1 days);
 
         return (pool.volatility * decay + priceChange * (PRECISION - decay)) / PRECISION;
-    }
-
-    /// @notice Calculate optimal swap amount considering pool depth, volatility, and price impact constraints
-    /// @dev Uses square root formula to find optimal amount, then adjusts for price impact and slippage
-    /// @dev Formula: optimalAmount = √((amountIn × reserveIn × PRECISION) / (depth × (PRECISION + volatility)))
-    /// @param pool Current pool state with reserves, depth, and volatility
-    /// @param params Swap parameters including amountIn, minAmountOut, maxPriceImpact, maxSlippage
-    /// @return optimalAmount Optimized amount to swap (may be less than amountIn to meet constraints)
-    /// @return expectedOutput Expected output tokens after fees and slippage
-    /// @custom:math Minimizes slippage while respecting maxPriceImpact constraint via Lagrange multipliers
-    /// @custom:security Reverts if expectedOutput < minAmountOut (slippage protection)
-    function calculateOptimalSwapAmount(
-        PoolState memory pool,
-        SwapParams memory params
-    ) internal pure returns (uint256 optimalAmount, uint256 expectedOutput) {
-        // Base optimal amount using square root formula
-        optimalAmount = MathLib.sqrt(
-            (params.amountIn * pool.reserveIn * PRECISION) / 
-            (pool.depth * (PRECISION + pool.volatility))
-        );
-        
-        // Adjust for price impact
-        uint256 priceImpact = calculatePriceImpact(optimalAmount, pool);
-        if (priceImpact > params.maxPriceImpact) {
-            // Reduce amount to meet price impact constraint
-            optimalAmount = (optimalAmount * params.maxPriceImpact) / priceImpact;
-        }
-        
-        // Calculate expected output
-        uint256 numerator = optimalAmount * pool.reserveOut;
-        uint256 denominator = pool.reserveIn + optimalAmount;
-        expectedOutput = (numerator * (PRECISION - params.maxSlippage)) / (denominator * PRECISION);
-        
-        // Ensure minimum output is met
-        require(expectedOutput >= params.minAmountOut, "Insufficient output amount");
-        
-        return (optimalAmount, expectedOutput);
     }
 
     /// @notice Validate swap parameters and pool conditions before execution

@@ -117,37 +117,6 @@ describe("Libraries", function () {
       });
     });
 
-    describe("geometricMean", function () {
-      it("Should return 0 if either input is 0", async function () {
-        const { mathLib } = await loadFixture(deployLibraryTestsFixture);
-        expect(await mathLib.testGeometricMean(0, 100)).to.equal(0);
-        expect(await mathLib.testGeometricMean(100, 0)).to.equal(0);
-        expect(await mathLib.testGeometricMean(0, 0)).to.equal(0);
-      });
-
-      it("Should calculate geometric mean for equal numbers", async function () {
-        const { mathLib } = await loadFixture(deployLibraryTestsFixture);
-        expect(await mathLib.testGeometricMean(100n, 100n)).to.equal(100n);
-        expect(await mathLib.testGeometricMean(1000000n, 1000000n)).to.equal(1000000n);
-      });
-
-      it("Should calculate geometric mean correctly", async function () {
-        const { mathLib } = await loadFixture(deployLibraryTestsFixture);
-        // GM(4, 9) = sqrt(36) = 6
-        expect(await mathLib.testGeometricMean(4n, 9n)).to.equal(6n);
-        // GM(1000000, 4000000) = sqrt(4*10^12) = 2*10^6
-        expect(await mathLib.testGeometricMean(1000000n, 4000000n)).to.equal(2000000n);
-      });
-
-      it("Should handle large numbers using log approximation", async function () {
-        const { mathLib } = await loadFixture(deployLibraryTestsFixture);
-        const large1 = ethers.MaxUint256 / 4n;
-        const large2 = ethers.MaxUint256 / 4n;
-        const result = await mathLib.testGeometricMean(large1, large2);
-        expect(result).to.be.gt(0);
-      });
-    });
-
     describe("log2", function () {
       it("Should return 0 for input 0", async function () {
         const { mathLib } = await loadFixture(deployLibraryTestsFixture);
@@ -201,59 +170,6 @@ describe("Libraries", function () {
       });
     });
 
-    describe("calculateOptimalAmount", function () {
-      it("Should reject invalid path lengths", async function () {
-        const { mathLib } = await loadFixture(deployLibraryTestsFixture);
-        await expect(
-          mathLib.testCalculateOptimalAmount(1000, 2, 0)
-        ).to.be.reverted;
-
-        await expect(
-          mathLib.testCalculateOptimalAmount(1000, 6, 0)
-        ).to.be.reverted;
-      });
-
-      it("Should calculate amounts for 3-way swaps (equal distribution)", async function () {
-        const { mathLib } = await loadFixture(deployLibraryTestsFixture);
-        const amount = 1000000n;
-
-        const pos0 = await mathLib.testCalculateOptimalAmount(amount, 3, 0);
-        const pos1 = await mathLib.testCalculateOptimalAmount(amount, 3, 1);
-        const pos2 = await mathLib.testCalculateOptimalAmount(amount, 3, 2);
-
-        // For 3-way, should be roughly equal distribution
-        expect(pos0).to.be.gt(pos1);
-        expect(pos1).to.be.gt(pos2);
-      });
-
-      it("Should calculate amounts for 4-way swaps (golden ratio)", async function () {
-        const { mathLib } = await loadFixture(deployLibraryTestsFixture);
-        const amount = 1000000n;
-
-        const pos0 = await mathLib.testCalculateOptimalAmount(amount, 4, 0);
-        const pos1 = await mathLib.testCalculateOptimalAmount(amount, 4, 1);
-        const pos2 = await mathLib.testCalculateOptimalAmount(amount, 4, 2);
-        const pos3 = await mathLib.testCalculateOptimalAmount(amount, 4, 3);
-
-        // Amounts should decrease according to golden ratio
-        expect(pos0).to.be.gt(pos1);
-        expect(pos1).to.be.gt(pos2);
-        expect(pos2).to.be.gt(pos3);
-      });
-
-      it("Should calculate amounts for 5-way swaps (golden ratio squared)", async function () {
-        const { mathLib } = await loadFixture(deployLibraryTestsFixture);
-        const amount = 1000000n;
-
-        const pos0 = await mathLib.testCalculateOptimalAmount(amount, 5, 0);
-        const pos1 = await mathLib.testCalculateOptimalAmount(amount, 5, 1);
-        const pos4 = await mathLib.testCalculateOptimalAmount(amount, 5, 4);
-
-        // Amounts should decrease
-        expect(pos0).to.be.gt(pos1);
-        expect(pos1).to.be.gt(pos4);
-      });
-    });
   });
 
   describe("PoolLib", function () {
@@ -475,35 +391,6 @@ describe("Libraries", function () {
       });
     });
 
-    describe("calculateOptimalSwapAmount", function () {
-      it("Should revert if minimum output cannot be met (insufficient liquidity)", async function () {
-        const { poolLib } = await loadFixture(deployLibraryTestsFixture);
-        const poolState = {
-          reserveIn: ethers.parseEther("1000"),
-          reserveOut: ethers.parseEther("100"), // Low liquidity out
-          sellingToken0: true,
-          tokenOut: ethers.ZeroAddress,
-          priceImpact: 0,
-          depth: ethers.parseEther("316"),
-          volatility: 10000n,
-          lastUpdateTimestamp: 0,
-          volumeAccumulator: 0
-        };
-
-        const swapParams = {
-          amountIn: ethers.parseEther("10"),
-          minAmountOut: ethers.parseEther("50"), // Unrealistic expectation
-          maxPriceImpact: 100000n,
-          deadline: Math.floor(Date.now() / 1000) + 3600,
-          maxSlippage: 10000n
-        };
-
-        await expect(
-          poolLib.testCalculateOptimalSwapAmount(poolState, swapParams)
-        ).to.be.revertedWith("Insufficient output amount");
-      });
-    });
-
     describe("validateSwap", function () {
       it("Should validate a valid swap", async function () {
         const { poolLib } = await loadFixture(deployLibraryTestsFixture);
@@ -708,17 +595,32 @@ describe("Libraries", function () {
         ).to.be.revertedWithCustomError(securityLib, "Unauthorized");
       });
 
-      it("Should transfer ownership correctly", async function () {
+      it("Should transfer ownership in two steps (Ownable2Step)", async function () {
         const { securityLib, owner, user1 } = await loadFixture(deployLibraryTestsFixture);
 
+        // Step 1: current owner nominates - ownership does NOT change yet
         await expect(securityLib.connect(owner).testTransferOwnership(user1.address))
+          .to.emit(securityLib, "OwnershipTransferStarted")
+          .withArgs(owner.address, user1.address);
+
+        expect(await securityLib.getPendingOwner()).to.equal(user1.address);
+        // Owner is still the original owner until acceptance
+        expect(await securityLib.getOwner()).to.equal(owner.address);
+        await expect(securityLib.connect(owner).testCheckOwner()).to.not.be.reverted;
+        await expect(
+          securityLib.connect(user1).testCheckOwner()
+        ).to.be.revertedWithCustomError(securityLib, "Unauthorized");
+
+        // Step 2: nominee accepts - ownership transfers and pendingOwner is cleared
+        await expect(securityLib.connect(user1).testAcceptOwnership())
           .to.emit(securityLib, "OwnershipTransferred")
           .withArgs(owner.address, user1.address);
 
-        // New owner should be able to perform owner actions
-        await expect(securityLib.connect(user1).testCheckOwner()).to.not.be.reverted;
+        expect(await securityLib.getOwner()).to.equal(user1.address);
+        expect(await securityLib.getPendingOwner()).to.equal(ethers.ZeroAddress);
 
-        // Old owner should not
+        // New owner can perform owner actions, old owner cannot
+        await expect(securityLib.connect(user1).testCheckOwner()).to.not.be.reverted;
         await expect(
           securityLib.connect(owner).testCheckOwner()
         ).to.be.revertedWithCustomError(securityLib, "Unauthorized");
@@ -729,6 +631,33 @@ describe("Libraries", function () {
         await expect(
           securityLib.connect(owner).testTransferOwnership(ethers.ZeroAddress)
         ).to.be.revertedWithCustomError(securityLib, "InvalidAddress");
+      });
+
+      it("Should prevent a non-pending address from accepting ownership", async function () {
+        const { securityLib, owner, user1, user2 } = await loadFixture(deployLibraryTestsFixture);
+
+        // Nominate user1
+        await securityLib.connect(owner).testTransferOwnership(user1.address);
+
+        // A non-pending address (user2) cannot accept
+        await expect(
+          securityLib.connect(user2).testAcceptOwnership()
+        ).to.be.revertedWithCustomError(securityLib, "Unauthorized");
+
+        // Even the current owner cannot accept (only the pending nominee can)
+        await expect(
+          securityLib.connect(owner).testAcceptOwnership()
+        ).to.be.revertedWithCustomError(securityLib, "Unauthorized");
+
+        // Ownership remains unchanged
+        expect(await securityLib.getOwner()).to.equal(owner.address);
+      });
+
+      it("Should revert acceptOwnership when there is no pending nomination", async function () {
+        const { securityLib, user1 } = await loadFixture(deployLibraryTestsFixture);
+        await expect(
+          securityLib.connect(user1).testAcceptOwnership()
+        ).to.be.revertedWithCustomError(securityLib, "Unauthorized");
       });
     });
 

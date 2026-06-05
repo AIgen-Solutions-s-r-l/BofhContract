@@ -236,8 +236,8 @@ describe("Swap Execution Tests", function () {
     });
   });
 
-  describe("4-Way Swap Execution (Golden Ratio Optimization)", function () {
-    it("Should execute 4-way swap with golden ratio splits", async function () {
+  describe("4-Way Swap Execution (BASE → A → B → C → BASE)", function () {
+    it("Should execute 4-way multi-hop swap", async function () {
       const { bofh, baseToken, tokenA, tokenB, tokenC, user1 } = await loadFixture(deployContractsFixture);
 
       const path = [
@@ -257,7 +257,7 @@ describe("Swap Execution Tests", function () {
       ).to.not.be.reverted;
     });
 
-    it("Should apply golden ratio (φ ≈ 0.618) for amount distribution", async function () {
+    it("Should pass the full amount through each hop (no amount-splitting)", async function () {
       const { bofh, baseToken, tokenA, tokenB, tokenC, user1 } = await loadFixture(deployContractsFixture);
 
       const path = [
@@ -303,7 +303,7 @@ describe("Swap Execution Tests", function () {
     });
   });
 
-  describe("5-Way Swap Execution (Complex Optimization)", function () {
+  describe("5-Way Swap Execution (max path length)", function () {
     it("Should execute 5-way swap (max path length)", async function () {
       const { bofh, baseToken, tokenA, tokenB, tokenC, tokenD, user1 } = await loadFixture(deployContractsFixture);
 
@@ -325,7 +325,7 @@ describe("Swap Execution Tests", function () {
       ).to.not.be.reverted;
     });
 
-    it("Should apply golden ratio squared (φ² ≈ 0.382) for 5-way splits", async function () {
+    it("Should execute a 5-hop swap and complete successfully", async function () {
       const { bofh, baseToken, tokenA, tokenB, tokenC, tokenD, user1 } = await loadFixture(deployContractsFixture);
 
       const path = [

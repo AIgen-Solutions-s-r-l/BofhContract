@@ -16,23 +16,11 @@ contract MathLibTest {
         return MathLib.cbrt(x);
     }
 
-    function testGeometricMean(uint256 a, uint256 b) external pure returns (uint256) {
-        return MathLib.geometricMean(a, b);
-    }
-
     function testLog2(uint256 x) external pure returns (uint256) {
         return MathLib.log2(x);
     }
 
     function testExp2(uint256 x) external pure returns (uint256) {
         return MathLib.exp2(x);
-    }
-
-    function testCalculateOptimalAmount(
-        uint256 amount,
-        uint256 pathLength,
-        uint256 position
-    ) external pure returns (uint256) {
-        return MathLib.calculateOptimalAmount(amount, pathLength, position);
     }
 }
