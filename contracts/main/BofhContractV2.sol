@@ -21,10 +21,18 @@ contract BofhContractV2 is BofhContractBase, IBofhContract {
     /// @notice Uniswap V2-style factory address for pair lookups
     address private immutable factory;
 
-    /// @notice Maximum allowed per-hop fee in basis points out of 10000 (10% = 1000 bps)
-    /// @dev Tightened from 10000 (100%) to 1000 (10%): rejects absurd fees while still covering
-    /// @dev real-world DEX forks. Per-fee validation in _validateSwapInputs enforces this cap.
-    uint256 private constant MAX_FEE_BPS = 1000;
+    /// @notice Default per-hop fee in basis points used for the reserved dexId 0 (immutable factory)
+    /// @dev 30 = 0.3%, reproducing the legacy 997/1000 result. The multi-DEX worker substitutes
+    /// @dev this only when a caller opts in via the type(uint256).max sentinel for that hop.
+    uint16 private constant DEFAULT_DEX_FEE_BPS = 30;
+
+    /// @notice Sentinel fee value: when fees[i] == this, substitute the resolved DEX's registry fee
+    /// @dev Lets callers say "use whatever this DEX charges" without knowing it, while keeping
+    /// @dev an explicit fees[i] caller-authoritative by default.
+    uint256 private constant USE_REGISTRY_FEE = type(uint256).max;
+
+    // MAX_FEE_BPS (= 1000) is inherited from DexRegistry so the registry's feeBps validation
+    // and this router's _validateSwapInputs reference one single definition.
 
     /// @notice Internal state tracking for multi-step swap execution
     /// @dev Minimal state for tracking swap progress across multiple hops
@@ -36,6 +44,20 @@ contract BofhContractV2 is BofhContractBase, IBofhContract {
         address currentToken;
         uint256 currentAmount;
         uint256 cumulativeImpact;
+    }
+
+    /// @notice In-memory simulated reserve record for a pair, used ONLY by the fee-aware views
+    /// @dev Lets getOptimalPathMetrics(fees) reflect intra-path reserve changes when a path revisits
+    /// @dev the same pool (e.g. BASE->A->BASE), so the view matches realized execution to the wei.
+    /// @dev Reserves are stored CANONICALLY in token0/token1 orientation (not per-hop tokenIn) so any
+    /// @dev later hop reads them correctly regardless of direction.
+    /// @custom:field pair Pair contract address (zero = empty slot)
+    /// @custom:field reserve0 Simulated reserve of token0
+    /// @custom:field reserve1 Simulated reserve of token1
+    struct SimReserve {
+        address pair;
+        uint256 reserve0;
+        uint256 reserve1;
     }
 
     // Custom errors inherited from IBofhContract interface
@@ -179,13 +201,16 @@ contract BofhContractV2 is BofhContractBase, IBofhContract {
             _safeTransferFrom(cachedBaseToken, msg.sender, address(this), amountIn);
         }
 
-        // Execute swaps along the path
+        // Execute swaps along the path (legacy single-DEX: every hop uses the immutable factory).
+        // Pass the immutable `factory` directly (no local) to keep the stack footprint unchanged.
         for (uint256 i = 0; i < lastIndex;) {
             state = executePathStep(
                 state,
                 path[i],
                 path[i + 1],
-                fees[i]
+                fees[i],
+                factory,
+                false // legacy path: no FoT entry/per-hop resizing (byte-identical behavior)
             );
 
             unchecked {
@@ -363,6 +388,167 @@ contract BofhContractV2 is BofhContractBase, IBofhContract {
         return outputs;
     }
 
+    /// @notice Execute a single swap whose hops may route through DIFFERENT registered DEXes
+    /// @dev ADDITIVE multi-DEX entrypoint. Same proven token-flow as executeSwap (pre-fund ->
+    /// @dev IGenericPair.swap -> balanceOf delta); the ONLY difference is each hop resolves its
+    /// @dev pair from a per-hop factory selected by dexIds[i]. dexId 0 = the immutable factory.
+    /// @dev Protected by nonReentrant, whenNotPaused, antiMEV (identical to executeSwap).
+    /// @param path Token swap path (must start and end with baseToken)
+    /// @param fees Per-hop fee array in basis points; fees[i]==type(uint256).max opts into the
+    /// @param fees registry feeBps for that hop, otherwise the explicit value is authoritative
+    /// @param dexIds Per-hop DEX selector (length = path.length - 1). dexId 0 = immutable factory
+    /// @param amountIn Input amount in baseToken
+    /// @param minAmountOut Minimum acceptable output (slippage protection)
+    /// @param deadline Unix timestamp after which the transaction reverts
+    /// @return The actual output amount from the swap
+    function executeSwapMultiDex(
+        address[] calldata path,
+        uint256[] calldata fees,
+        uint16[] calldata dexIds,
+        uint256 amountIn,
+        uint256 minAmountOut,
+        uint256 deadline
+    ) external nonReentrant whenNotPaused antiMEV returns (uint256) {
+        return _executeSwapMultiDex(path, fees, dexIds, amountIn, minAmountOut, deadline);
+    }
+
+    /// @notice Multi-DEX swap worker (clone of _executeSwapToRecipient with per-hop factory resolution)
+    /// @dev Adds: (1) dexIds length check, (2) per-hop (factory,fee) resolution via _resolveDex,
+    /// @dev (3) FoT-aware entry sizing (seed currentAmount from the realized baseToken delta).
+    /// @dev Output-side FoT is already correct everywhere because per-hop output is balanceOf-delta based.
+    function _executeSwapMultiDex(
+        address[] calldata path,
+        uint256[] calldata fees,
+        uint16[] calldata dexIds,
+        uint256 amountIn,
+        uint256 minAmountOut,
+        uint256 deadline
+    ) internal returns (uint256) {
+        // Reuse the full input validation (deadline, path structure, amounts, fees <= MAX_FEE_BPS).
+        // Note: the registry-fee sentinel (type(uint256).max) is intentionally exempt from the
+        // fees[i] <= MAX_FEE_BPS check below by validating the substituted fee per hop instead.
+        uint256 pathLength = _validateSwapInputsMultiDex(path, fees, amountIn, minAmountOut, deadline);
+
+        // dexIds must parallel the hops
+        if (dexIds.length != pathLength - 1) revert InvalidArrayLength();
+
+        SwapState memory state;
+        {
+            address cachedBaseToken = baseToken;
+
+            // FoT-aware entry sizing: size the first hop on the RECEIVED baseToken, not the
+            // nominal amountIn. For non-FoT tokens received == amountIn (byte-identical behavior).
+            uint256 balBefore = IBEP20(cachedBaseToken).balanceOf(address(this));
+            _safeTransferFrom(cachedBaseToken, msg.sender, address(this), amountIn);
+            uint256 received = IBEP20(cachedBaseToken).balanceOf(address(this)) - balBefore;
+
+            state = SwapState({
+                currentToken: cachedBaseToken,
+                currentAmount: received,
+                cumulativeImpact: 0
+            });
+        }
+
+        // Execute swaps in a sub-call so the three calldata arrays do not co-exist with the
+        // loop locals on the stack (avoids "stack too deep").
+        state = _runMultiDexHops(state, path, dexIds, fees);
+
+        // Validate final output
+        if (state.currentAmount < minAmountOut) revert InsufficientOutput();
+
+        // Calculate total price impact and validate (uses nominal amountIn, matching legacy path)
+        uint256 priceImpact;
+        unchecked {
+            priceImpact = (state.cumulativeImpact * PRECISION) / amountIn;
+        }
+        if (priceImpact > maxPriceImpact) revert ExcessiveSlippage();
+
+        // Transfer profit to caller
+        _safeTransfer(baseToken, msg.sender, state.currentAmount);
+
+        emit SwapExecuted(
+            msg.sender,
+            pathLength,
+            amountIn,
+            state.currentAmount,
+            priceImpact
+        );
+
+        return state.currentAmount;
+    }
+
+    /// @notice Execute each hop of a multi-DEX swap, resolving the factory + fee per hop
+    /// @dev Extracted from _executeSwapMultiDex to reduce stack depth (the three calldata arrays
+    /// @dev no longer co-exist with the outer scalars/locals). Token-flow is identical to the
+    /// @dev legacy loop: pre-fund -> IGenericPair.swap -> balanceOf delta, only the factory varies.
+    /// @param state Current swap state (seeded with the FoT-aware received amount)
+    /// @param path Token path
+    /// @param dexIds Per-hop DEX selector (0 = immutable factory)
+    /// @param fees Per-hop caller fees (sentinel => registry fee)
+    /// @return Updated swap state after all hops
+    function _runMultiDexHops(
+        SwapState memory state,
+        address[] calldata path,
+        uint16[] calldata dexIds,
+        uint256[] calldata fees
+    ) private returns (SwapState memory) {
+        uint256 hops = dexIds.length;
+        for (uint256 i = 0; i < hops;) {
+            (address f, uint256 hopFee) = _resolveHopFactoryAndFee(dexIds[i], fees[i]);
+            state = executePathStep(
+                state,
+                path[i],
+                path[i + 1],
+                hopFee,
+                f,
+                true // multi-DEX path: FoT-safe per-hop output sizing
+            );
+            unchecked { ++i; }
+        }
+        return state;
+    }
+
+    /// @notice Validate multi-DEX swap inputs, allowing the registry-fee sentinel per hop
+    /// @dev Identical to _validateSwapInputs except a fees[i] == type(uint256).max sentinel is
+    /// @dev permitted (it means "use the registry's fee"); a concrete fee is still capped at MAX_FEE_BPS.
+    function _validateSwapInputsMultiDex(
+        address[] calldata path,
+        uint256[] calldata fees,
+        uint256 amountIn,
+        uint256 minAmountOut,
+        uint256 deadline
+    ) private view returns (uint256 pathLength) {
+        // 1. Deadline validation
+        if (deadline == 0) revert InvalidAmount();
+        if (block.timestamp > deadline) revert DeadlineExpired();
+
+        // 2. Array length validation
+        pathLength = path.length;
+        if (pathLength == 0) revert InvalidArrayLength();
+        if (pathLength < 2 || pathLength > MAX_PATH_LENGTH) revert InvalidPath();
+        if (pathLength != fees.length + 1) revert InvalidArrayLength();
+
+        // 3. Amount validation
+        if (amountIn == 0) revert InvalidAmount();
+        if (minAmountOut == 0) revert InvalidAmount();
+
+        // 4. Path address validation
+        for (uint256 i = 0; i < pathLength;) {
+            if (path[i] == address(0)) revert InvalidAddress();
+            unchecked { ++i; }
+        }
+
+        // 5. Path structure validation (cache baseToken to avoid double SLOAD)
+        address cachedBaseToken = baseToken;
+        if (path[0] != cachedBaseToken || path[pathLength - 1] != cachedBaseToken) revert InvalidPath();
+
+        // 6. Fee validation: concrete fees capped at MAX_FEE_BPS; the registry-fee sentinel is allowed
+        for (uint256 i = 0; i < fees.length;) {
+            if (fees[i] != USE_REGISTRY_FEE && fees[i] > MAX_FEE_BPS) revert InvalidFee();
+            unchecked { ++i; }
+        }
+    }
+
     /// @notice Execute a single step in a multi-hop swap path
     /// @dev Executes swap through pair, updates swap state with new amount and cumulative price impact
     /// @param state Current swap state (token, amount, impact)
@@ -374,19 +560,29 @@ contract BofhContractV2 is BofhContractBase, IBofhContract {
     /// @custom:optimization Removed unused parameters (stepIndex, pathLength) for gas savings
     /// @custom:fee Consumes the caller-supplied per-hop fee so the router prices correctly on
     /// @custom:fee DEXes with non-0.3% fees (Pancake 0.25%, Uniswap 0.3%, higher-fee forks)
+    /// @param pairFactory Factory to resolve the pair for this hop. The legacy single-DEX path
+    /// @param pairFactory passes the immutable `factory` (so behavior is byte-identical); the
+    /// @param pairFactory multi-DEX worker passes the per-hop factory resolved from the registry.
+    /// @param fotSafe When false (legacy path) the proven assembly pricing + pre-fund order is used
+    /// @param fotSafe verbatim. When true (multi-DEX path) the output is sized on the amount the PAIR
+    /// @param fotSafe actually receives (measured via balanceOf delta), so fee-on-transfer tokens at
+    /// @param fotSafe ANY hop price correctly and never trip the pool's x*y=k ("K") check. For non-FoT
+    /// @param fotSafe tokens the pair-received amount equals the amount sent, so results are identical.
     function executePathStep(
         SwapState memory state,
         address tokenIn,
         address tokenOut,
-        uint256 feeBps
+        uint256 feeBps,
+        address pairFactory,
+        bool fotSafe
     ) private returns (SwapState memory) {
-        // Defense-in-depth: the assembly below computes (10000 - feeBps). Callers reach this
-        // private helper only via _validateSwapInputs (which enforces fees[i] <= MAX_FEE_BPS),
-        // but re-check here so the subtraction can never underflow if a future caller forgets.
+        // Defense-in-depth: the pricing computes (10000 - feeBps). Callers reach this private helper
+        // only via validated entrypoints (fees[i] <= MAX_FEE_BPS), but re-check so the subtraction
+        // can never underflow if a future caller forgets.
         if (feeBps > MAX_FEE_BPS) revert InvalidFee();
 
-        // Get the pair address for these two tokens
-        address pairAddress = _getPair(tokenIn, tokenOut);
+        // Get the pair address for these two tokens from the supplied factory (DEX-specific)
+        address pairAddress = _getPairFrom(pairFactory, tokenIn, tokenOut);
 
         // Analyze pool state using the pair address
         PoolLib.PoolState memory pool = PoolLib.analyzePool(
@@ -408,54 +604,61 @@ contract BofhContractV2 is BofhContractBase, IBofhContract {
         // Validate pool state
         if (!PoolLib.validateSwap(pool, params)) revert InvalidSwapParameters();
 
-        // Calculate expected output using constant product formula (x * y = k)
-        // amountOut = (amountIn * reserveOut * (10000 - feeBps)) /
-        //             (reserveIn * 10000 + amountIn * (10000 - feeBps))
-        // feeBps is a 10000-basis per-hop fee (30 = 0.3%, reproducing the legacy 997/1000 result).
-        // Phase 3 optimization: Assembly for maximum gas efficiency
-        uint256 expectedOutput;
-        assembly {
-            // Load values from memory
-            let amountIn := mload(add(state, 0x20)) // state.currentAmount
-            let reserveOut := mload(add(pool, 0x20)) // pool.reserveOut (2nd field after reserveIn)
-            let reserveIn := mload(pool) // pool.reserveIn (1st field)
-
-            // Calculate: feeNum = 10000 - feeBps (feeBps=30 -> 9970, i.e. legacy 0.3%)
-            let feeNum := sub(10000, feeBps)
-
-            // Calculate: amountInWithFee = amountIn * feeNum
-            let amountInWithFee := mul(amountIn, feeNum)
-
-            // Calculate: numerator = amountInWithFee * reserveOut
-            let numerator := mul(amountInWithFee, reserveOut)
-
-            // Calculate: denominator = reserveIn * 10000 + amountInWithFee
-            let denominator := add(mul(reserveIn, 10000), amountInWithFee)
-
-            // Calculate: expectedOutput = numerator / denominator
-            expectedOutput := div(numerator, denominator)
-        }
-
         // Add price impact (keep in Solidity for struct access simplicity)
         unchecked {
             state.cumulativeImpact += pool.priceImpact;
         }
 
-        // Transfer tokens to the pair contract (Uniswap V2 pattern)
-        // Phase 3 optimization: Low-level call for gas efficiency
-        _safeTransfer(tokenIn, pairAddress, state.currentAmount);
+        if (fotSafe) {
+            // FoT-safe: transfer first, size output on the amount the PAIR actually received.
+            // Works for fee-on-transfer tokens at any hop; for normal tokens received == sent.
+            uint256 pairInBefore = IBEP20(tokenIn).balanceOf(pairAddress);
+            _safeTransfer(tokenIn, pairAddress, state.currentAmount);
+            uint256 pairReceived = IBEP20(tokenIn).balanceOf(pairAddress) - pairInBefore;
 
-        {
+            // Same CPMM-with-fee formula/operation-order as the legacy assembly below.
+            uint256 amountInWithFee = pairReceived * (10000 - feeBps);
+            uint256 expectedOutput =
+                (amountInWithFee * pool.reserveOut) / (pool.reserveIn * 10000 + amountInWithFee);
+
             uint256 balanceBefore = IBEP20(tokenOut).balanceOf(address(this));
-
-            // Execute swap on the pair contract
             IGenericPair(pairAddress).swap(
                 pool.sellingToken0 ? 0 : expectedOutput,
                 pool.sellingToken0 ? expectedOutput : 0,
                 address(this),
                 new bytes(0)
             );
+            state.currentAmount = IBEP20(tokenOut).balanceOf(address(this)) - balanceBefore;
+            state.currentToken = tokenOut;
+            return state;
+        }
 
+        // Legacy path (byte-identical): assembly pricing on state.currentAmount, then pre-fund + swap.
+        // amountOut = (amountIn * reserveOut * (10000 - feeBps)) /
+        //             (reserveIn * 10000 + amountIn * (10000 - feeBps))
+        uint256 legacyExpectedOutput;
+        assembly {
+            let amountIn := mload(add(state, 0x20)) // state.currentAmount
+            let reserveOut := mload(add(pool, 0x20)) // pool.reserveOut
+            let reserveIn := mload(pool) // pool.reserveIn
+            let feeNum := sub(10000, feeBps)
+            let amountInWithFee := mul(amountIn, feeNum)
+            let numerator := mul(amountInWithFee, reserveOut)
+            let denominator := add(mul(reserveIn, 10000), amountInWithFee)
+            legacyExpectedOutput := div(numerator, denominator)
+        }
+
+        // Transfer tokens to the pair contract (Uniswap V2 pattern)
+        _safeTransfer(tokenIn, pairAddress, state.currentAmount);
+
+        {
+            uint256 balanceBefore = IBEP20(tokenOut).balanceOf(address(this));
+            IGenericPair(pairAddress).swap(
+                pool.sellingToken0 ? 0 : legacyExpectedOutput,
+                pool.sellingToken0 ? legacyExpectedOutput : 0,
+                address(this),
+                new bytes(0)
+            );
             state.currentAmount = IBEP20(tokenOut).balanceOf(address(this)) - balanceBefore;
         }
         state.currentToken = tokenOut;
@@ -511,14 +714,308 @@ contract BofhContractV2 is BofhContractBase, IBofhContract {
         return (expectedOutput, priceImpact, optimalityScore);
     }
 
-    /// @notice Get pair address for two tokens from factory
-    /// @dev Helper function to resolve pair address from token addresses
+    /// @notice Fee-aware metrics: off-chain mirror of executeSwap that EXACTLY matches realized output
+    /// @dev ADDITIVE, DISTINCTLY NAMED (not an overload of getOptimalPathMetrics) so ABI consumers
+    /// @dev never face an ambiguous-by-arity selector. Uses the identical constant-product-with-fee
+    /// @dev formula as executePathStep (and the same operation order), chaining reserves hop-by-hop so
+    /// @dev the returned expectedOutput equals the realized round-trip output of executeSwap to the wei
+    /// @dev for standard (non-fee-on-transfer) ERC20s.
+    /// @param path Array of token addresses for the swap path (resolved against the immutable factory)
+    /// @param amounts Array whose amounts[0] is the initial input
+    /// @param fees Per-hop fee array in basis points (length = path.length - 1, each <= MAX_FEE_BPS)
+    /// @return expectedOutput Final expected output after all hops
+    /// @return priceImpact Cumulative price impact across the path (scaled by PRECISION)
+    /// @return optimalityScore Ratio of output to input (scaled by PRECISION, >1e6 = profitable)
+    function getOptimalPathMetricsWithFees(
+        address[] calldata path,
+        uint256[] calldata amounts,
+        uint256[] calldata fees
+    ) external view returns (
+        uint256 expectedOutput,
+        uint256 priceImpact,
+        uint256 optimalityScore
+    ) {
+        if (path.length < 2 || path.length > MAX_PATH_LENGTH) revert InvalidPath();
+        if (fees.length != path.length - 1) revert InvalidArrayLength();
+
+        // Simulate the full path (tracking per-pair reserve changes) so the result equals exec.
+        (expectedOutput, priceImpact) = _simulatePath(path, fees, amounts[0]);
+
+        unchecked {
+            optimalityScore = (expectedOutput * PRECISION) / amounts[0];
+        }
+    }
+
+    /// @notice Fee- and DEX-aware metrics: off-chain mirror of executeSwapMultiDex
+    /// @dev ADDITIVE. Resolves each hop's factory (and optional fee) via _resolveDex, then prices
+    /// @dev with the same CPMM-with-fee formula as executePathStep so view == exec for multi-DEX paths
+    /// @dev of standard (non-fee-on-transfer) ERC20s (FoT/rebasing tokens are not modelled by the view).
+    /// @param path Array of token addresses for the swap path
+    /// @param amounts Array whose amounts[0] is the initial input
+    /// @param dexIds Per-hop DEX selector (length = path.length - 1; dexId 0 = immutable factory)
+    /// @param fees Per-hop fee array; fees[i]==type(uint256).max uses the resolved DEX's registry fee
+    /// @return expectedOutput Final expected output after all hops
+    /// @return priceImpact Cumulative price impact across the path (scaled by PRECISION)
+    /// @return optimalityScore Ratio of output to input (scaled by PRECISION, >1e6 = profitable)
+    function getOptimalPathMetricsMultiDex(
+        address[] calldata path,
+        uint256[] calldata amounts,
+        uint16[] calldata dexIds,
+        uint256[] calldata fees
+    ) external view returns (
+        uint256 expectedOutput,
+        uint256 priceImpact,
+        uint256 optimalityScore
+    ) {
+        if (path.length < 2 || path.length > MAX_PATH_LENGTH) revert InvalidPath();
+        if (fees.length != path.length - 1) revert InvalidArrayLength();
+        if (dexIds.length != path.length - 1) revert InvalidArrayLength();
+
+        // Resolve per-hop factories + effective fees into memory arrays, then simulate (sub-calls
+        // keep the four calldata arrays off the stack during the loop -> avoids "stack too deep").
+        (address[] memory factories, uint256[] memory hopFees) = _resolveHops(dexIds, fees);
+        (expectedOutput, priceImpact) = _simulatePathMultiDex(path, factories, hopFees, amounts[0]);
+
+        unchecked {
+            optimalityScore = (expectedOutput * PRECISION) / amounts[0];
+        }
+    }
+
+    /// @notice Resolve per-hop (factory, fee) for every hop from dexIds + caller fees
+    /// @dev Applies the registry-fee sentinel and caps each effective fee at MAX_FEE_BPS.
+    /// @param dexIds Per-hop DEX selector
+    /// @param fees Per-hop caller fees (sentinel => registry fee)
+    /// @return factories Resolved per-hop factory addresses
+    /// @return hopFees Effective per-hop fees in basis points
+    function _resolveHops(
+        uint16[] calldata dexIds,
+        uint256[] calldata fees
+    ) private view returns (address[] memory factories, uint256[] memory hopFees) {
+        uint256 hops = dexIds.length;
+        factories = new address[](hops);
+        hopFees = new uint256[](hops);
+        for (uint256 i = 0; i < hops;) {
+            (address f, uint16 regFee) = _resolveDex(dexIds[i]);
+            uint256 hopFee = fees[i] == USE_REGISTRY_FEE ? uint256(regFee) : fees[i];
+            if (hopFee > MAX_FEE_BPS) revert InvalidFee();
+            factories[i] = f;
+            hopFees[i] = hopFee;
+            unchecked { ++i; }
+        }
+    }
+
+    /// @notice Resolve a hop's (factory, fee) from a dexId + caller fee, applying the registry sentinel
+    /// @dev Used by the multi-DEX EXECUTION worker. Caps the resolved fee at MAX_FEE_BPS.
+    /// @param dexId Per-hop DEX selector (0 = immutable factory)
+    /// @param callerFee Caller fee for this hop (type(uint256).max => use the resolved DEX's fee)
+    /// @return f Resolved factory address
+    /// @return hopFee Effective per-hop fee in basis points (<= MAX_FEE_BPS)
+    function _resolveHopFactoryAndFee(uint16 dexId, uint256 callerFee) private view returns (address f, uint256 hopFee) {
+        uint16 regFee;
+        (f, regFee) = _resolveDex(dexId);
+        hopFee = callerFee == USE_REGISTRY_FEE ? uint256(regFee) : callerFee;
+        if (hopFee > MAX_FEE_BPS) revert InvalidFee();
+    }
+
+    /// @notice Simulate a single-DEX path (all hops via the immutable factory) with reserve tracking
+    /// @dev Mirrors realized execution EXACTLY: prices each hop with the CPMM-with-fee formula and
+    /// @dev updates the pool's simulated reserves, so revisited pools (e.g. BASE->A->BASE) match exec.
+    /// @param path Token path
+    /// @param fees Per-hop fees in basis points (each validated <= MAX_FEE_BPS here)
+    /// @param amountIn Initial input amount
+    /// @return expectedOutput Final output after all hops
+    /// @return cumulativeImpact Accumulated price impact across hops
+    function _simulatePath(
+        address[] calldata path,
+        uint256[] calldata fees,
+        uint256 amountIn
+    ) private view returns (uint256 expectedOutput, uint256 cumulativeImpact) {
+        uint256 hops = path.length - 1;
+        SimReserve[] memory sims = new SimReserve[](hops);
+        uint256 simCount;
+        expectedOutput = amountIn;
+
+        for (uint256 i = 0; i < hops;) {
+            if (fees[i] > MAX_FEE_BPS) revert InvalidFee();
+            (expectedOutput, cumulativeImpact, simCount) = _simHop(
+                _getPairFrom(factory, path[i], path[i + 1]),
+                path[i],
+                expectedOutput,
+                fees[i],
+                cumulativeImpact,
+                sims,
+                simCount
+            );
+            unchecked { ++i; }
+        }
+    }
+
+    /// @notice Simulate a multi-DEX path (per-hop factories) with reserve tracking
+    /// @dev Same reserve-tracking simulation as _simulatePath but each hop uses factories[i].
+    /// @param path Token path
+    /// @param factories Per-hop resolved factory addresses
+    /// @param hopFees Per-hop effective fees in basis points
+    /// @param amountIn Initial input amount
+    /// @return expectedOutput Final output after all hops
+    /// @return cumulativeImpact Accumulated price impact across hops
+    function _simulatePathMultiDex(
+        address[] calldata path,
+        address[] memory factories,
+        uint256[] memory hopFees,
+        uint256 amountIn
+    ) private view returns (uint256 expectedOutput, uint256 cumulativeImpact) {
+        uint256 hops = path.length - 1;
+        SimReserve[] memory sims = new SimReserve[](hops);
+        uint256 simCount;
+        expectedOutput = amountIn;
+
+        for (uint256 i = 0; i < hops;) {
+            (expectedOutput, cumulativeImpact, simCount) = _simHop(
+                _getPairFrom(factories[i], path[i], path[i + 1]),
+                path[i],
+                expectedOutput,
+                hopFees[i],
+                cumulativeImpact,
+                sims,
+                simCount
+            );
+            unchecked { ++i; }
+        }
+    }
+
+    /// @notice Price one simulated hop, tracking the pool's reserves so revisits match exec
+    /// @dev On first encounter of a pair, seeds simulated reserves from live reserves (oriented to
+    /// @dev this hop's tokenIn). Computes amountOut with the same operation order as executePathStep,
+    /// @dev accumulates price impact on the pre-hop reserves, then updates the simulated reserves.
+    /// @param pairAddress Resolved pair for this hop
+    /// @param tokenIn Input token for this hop
+    /// @param amountIn Input amount for this hop
+    /// @param feeBps Per-hop fee in basis points
+    /// @param cumulativeImpact Running cumulative price impact
+    /// @param sims Memory array of tracked pair reserve states
+    /// @param simCount Number of populated entries in sims
+    /// @return amountOut Output amount for this hop
+    /// @return newCumulativeImpact Updated cumulative price impact
+    /// @return newSimCount Updated number of populated sims entries
+    function _simHop(
+        address pairAddress,
+        address tokenIn,
+        uint256 amountIn,
+        uint256 feeBps,
+        uint256 cumulativeImpact,
+        SimReserve[] memory sims,
+        uint256 simCount
+    ) private view returns (uint256 amountOut, uint256 newCumulativeImpact, uint256 newSimCount) {
+        // Locate (or seed) this pair's simulated reserves in canonical token0/token1 orientation.
+        (uint256 idx, bool found) = _findSim(pairAddress, sims, simCount);
+        newSimCount = simCount;
+        if (!found) {
+            // First encounter: read live reserves canonically (token0/token1).
+            (uint256 r0, uint256 r1) = _liveReserves(pairAddress);
+            idx = simCount;
+            sims[idx] = SimReserve({pair: pairAddress, reserve0: r0, reserve1: r1});
+            unchecked { newSimCount = simCount + 1; }
+        }
+
+        // Orient to this hop's input token.
+        bool inIsToken0 = (tokenIn == IGenericPair(pairAddress).token0());
+        uint256 reserveIn = inIsToken0 ? sims[idx].reserve0 : sims[idx].reserve1;
+        uint256 reserveOut = inIsToken0 ? sims[idx].reserve1 : sims[idx].reserve0;
+
+        // Price impact on pre-hop reserves (matches PoolLib._calculatePriceImpactInline math).
+        unchecked {
+            newCumulativeImpact = cumulativeImpact + _priceImpact(amountIn, reserveIn, reserveOut);
+        }
+
+        // Same formula/operation-order as executePathStep's assembly so view == realized exec.
+        uint256 amountInWithFee = amountIn * (10000 - feeBps);
+        amountOut = (amountInWithFee * reserveOut) / (reserveIn * 10000 + amountInWithFee);
+
+        // Update simulated reserves (canonical orientation) for any later revisit on the path.
+        if (inIsToken0) {
+            sims[idx].reserve0 = reserveIn + amountIn;
+            sims[idx].reserve1 = reserveOut - amountOut;
+        } else {
+            sims[idx].reserve1 = reserveIn + amountIn;
+            sims[idx].reserve0 = reserveOut - amountOut;
+        }
+    }
+
+    /// @notice Find a pair's index in the tracked sims array
+    /// @param pairAddress Pair to look up
+    /// @param sims Tracked pair states
+    /// @param simCount Populated entries in sims
+    /// @return idx Index of the pair (valid only when found)
+    /// @return found True if the pair is already tracked
+    function _findSim(
+        address pairAddress,
+        SimReserve[] memory sims,
+        uint256 simCount
+    ) private pure returns (uint256 idx, bool found) {
+        for (uint256 j = 0; j < simCount;) {
+            if (sims[j].pair == pairAddress) return (j, true);
+            unchecked { ++j; }
+        }
+        return (0, false);
+    }
+
+    /// @notice Read a pair's live reserves in canonical token0/token1 orientation
+    /// @param pairAddress Pair to read
+    /// @return reserve0 Reserve of token0
+    /// @return reserve1 Reserve of token1
+    function _liveReserves(address pairAddress) private view returns (uint256 reserve0, uint256 reserve1) {
+        (reserve0, reserve1, ) = IGenericPair(pairAddress).getReserves();
+    }
+
+    /// @notice Price impact for a hop, matching PoolLib._calculatePriceImpactInline exactly
+    /// @param amountIn Input amount
+    /// @param reserveIn Input token reserve
+    /// @param reserveOut Output token reserve
+    /// @return Price impact scaled by PRECISION
+    function _priceImpact(uint256 amountIn, uint256 reserveIn, uint256 reserveOut) private pure returns (uint256) {
+        if (amountIn == 0) return 0;
+        uint256 newReserveIn = reserveIn + amountIn;
+        uint256 newReserveOut = (reserveIn * reserveOut) / newReserveIn;
+        uint256 oldPrice = (reserveOut * PRECISION) / reserveIn;
+        uint256 newPrice = (newReserveOut * PRECISION) / newReserveIn;
+        if (newPrice >= oldPrice) return 0;
+        return ((oldPrice - newPrice) * PRECISION) / oldPrice;
+    }
+
+    /// @notice Get pair address for two tokens from the contract's immutable factory
+    /// @dev Thin wrapper over _getPairFrom for legacy callers (getOptimalPathMetrics). Byte-identical
+    /// @dev to the previous behavior: resolves against `factory` and reverts PairDoesNotExist on zero.
     /// @param tokenA First token address
     /// @param tokenB Second token address
     /// @return pair The pair contract address
     function _getPair(address tokenA, address tokenB) internal view returns (address pair) {
-        pair = IFactory(factory).getPair(tokenA, tokenB);
+        return _getPairFrom(factory, tokenA, tokenB);
+    }
+
+    /// @notice Get pair address for two tokens from an arbitrary V2-style factory
+    /// @dev Enables per-hop multi-DEX routing: the same token pair resolves to different pair
+    /// @dev addresses on different DEX factories. Reverts PairDoesNotExist if the factory has no pair.
+    /// @param pairFactory Uniswap-V2-style factory to query
+    /// @param tokenA First token address
+    /// @param tokenB Second token address
+    /// @return pair The pair contract address
+    function _getPairFrom(address pairFactory, address tokenA, address tokenB) internal view returns (address pair) {
+        pair = IFactory(pairFactory).getPair(tokenA, tokenB);
         if (pair == address(0)) revert PairDoesNotExist();
+    }
+
+    /// @notice Resolve a dexId to its (factory, feeBps) — overrides DexRegistry where `factory` is visible
+    /// @dev dexId 0 is reserved for the immutable factory and needs ZERO registry writes (the legacy
+    /// @dev single-DEX deployment behaves exactly as today). dexId > 0 reads the registry mapping and
+    /// @dev reverts DexNotRegistered if the factory is unset or the DEX is disabled.
+    /// @param dexId Registry id to resolve
+    /// @return f Factory address for the resolved DEX
+    /// @return feeBps Flat per-hop fee for the resolved DEX
+    function _resolveDex(uint16 dexId) internal view override returns (address f, uint16 feeBps) {
+        if (dexId == 0) return (factory, DEFAULT_DEX_FEE_BPS);
+        DexInfo storage d = _dexRegistry[dexId];
+        if (d.factory == address(0) || !d.enabled) revert DexNotRegistered(dexId);
+        return (d.factory, d.feeBps);
     }
 
     /// @notice Get the base token address used for swaps

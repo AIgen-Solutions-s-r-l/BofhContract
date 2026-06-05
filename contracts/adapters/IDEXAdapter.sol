@@ -5,6 +5,12 @@ pragma solidity >=0.8.10;
 /// @notice Interface for DEX adapter implementations supporting multiple protocols
 /// @dev Abstracts DEX-specific logic (Uniswap V2, PancakeSwap, SushiSwap, etc.)
 /// @custom:pattern Adapter Pattern - Provides uniform interface to different DEX implementations
+/// @custom:warning NOT used by BofhContractV2's swap hot path. The router does multi-DEX routing via
+/// @custom:warning the on-chain DexRegistry ({factory, feeBps} per dexId) and keeps its proven
+/// @custom:warning pre-fund -> IGenericPair.swap -> balanceOf-delta token-flow. Adapter executeSwap
+/// @custom:warning pulls via transferFrom(msg.sender) and reprices with a hardcoded fee, which would
+/// @custom:warning double-pull intermediate tokens and re-introduce the "K"-revert fee bug. These
+/// @custom:warning adapters remain quote/off-chain helpers only.
 interface IDEXAdapter {
     // ============================================
     // EVENTS
