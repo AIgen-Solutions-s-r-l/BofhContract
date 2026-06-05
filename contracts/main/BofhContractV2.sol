@@ -4,6 +4,7 @@ pragma solidity >=0.8.10;
 import "./BofhContractBase.sol";
 import "../interfaces/ISwapInterfaces.sol";
 import "../interfaces/IBofhContract.sol";
+import "../libs/SwapMathLib.sol";
 
 /// @title BofhContractV2 - Advanced Multi-Path Token Swap Router
 /// @author Bofh Team
@@ -14,6 +15,7 @@ import "../interfaces/IBofhContract.sol";
 contract BofhContractV2 is BofhContractBase, IBofhContract {
     using MathLib for uint256;
     using PoolLib for PoolLib.PoolState;
+    using SwapMathLib for address;
 
     /// @notice Base token address (all swap paths must start and end with this token)
     address private immutable baseToken;
@@ -46,19 +48,8 @@ contract BofhContractV2 is BofhContractBase, IBofhContract {
         uint256 cumulativeImpact;
     }
 
-    /// @notice In-memory simulated reserve record for a pair, used ONLY by the fee-aware views
-    /// @dev Lets getOptimalPathMetrics(fees) reflect intra-path reserve changes when a path revisits
-    /// @dev the same pool (e.g. BASE->A->BASE), so the view matches realized execution to the wei.
-    /// @dev Reserves are stored CANONICALLY in token0/token1 orientation (not per-hop tokenIn) so any
-    /// @dev later hop reads them correctly regardless of direction.
-    /// @custom:field pair Pair contract address (zero = empty slot)
-    /// @custom:field reserve0 Simulated reserve of token0
-    /// @custom:field reserve1 Simulated reserve of token1
-    struct SimReserve {
-        address pair;
-        uint256 reserve0;
-        uint256 reserve1;
-    }
+    // The fee-aware view simulation type (SimReserve) and helpers live in SwapMathLib so the swap
+    // hot path and the off-chain views share ONE CPMM-with-fee implementation.
 
     // Custom errors inherited from IBofhContract interface
 
@@ -99,6 +90,8 @@ contract BofhContractV2 is BofhContractBase, IBofhContract {
     /// @return pathLength Length of the path for gas-optimized loops
     /// @custom:security Reverts with specific errors for each validation failure
     /// @custom:security Added in Issue #8 for comprehensive input sanitization
+    /// @custom:refactor Delegates to SwapMathLib.validateSwapInputs (internal => inlined, byte-identical).
+    /// @custom:refactor allowRegistrySentinel=false keeps the single-DEX fee cap (no sentinel exemption).
     function _validateSwapInputs(
         address[] calldata path,
         uint256[] calldata fees,
@@ -106,35 +99,9 @@ contract BofhContractV2 is BofhContractBase, IBofhContract {
         uint256 minAmountOut,
         uint256 deadline
     ) private view returns (uint256 pathLength) {
-        // 1. Deadline validation
-        if (deadline == 0) revert InvalidAmount();
-        if (block.timestamp > deadline) revert DeadlineExpired();
-
-        // 2. Array length validation
-        pathLength = path.length;
-        if (pathLength == 0) revert InvalidArrayLength();
-        if (pathLength < 2 || pathLength > MAX_PATH_LENGTH) revert InvalidPath();
-        if (pathLength != fees.length + 1) revert InvalidArrayLength();
-
-        // 3. Amount validation
-        if (amountIn == 0) revert InvalidAmount();
-        if (minAmountOut == 0) revert InvalidAmount();
-
-        // 4. Path address validation
-        for (uint256 i = 0; i < pathLength;) {
-            if (path[i] == address(0)) revert InvalidAddress();
-            unchecked { ++i; }
-        }
-
-        // 5. Path structure validation (cache baseToken to avoid double SLOAD)
-        address cachedBaseToken = baseToken;
-        if (path[0] != cachedBaseToken || path[pathLength - 1] != cachedBaseToken) revert InvalidPath();
-
-        // 6. Fee validation (fees must be reasonable, max MAX_FEE_BPS = 1000 bps = 10%)
-        for (uint256 i = 0; i < fees.length;) {
-            if (fees[i] > MAX_FEE_BPS) revert InvalidFee();
-            unchecked { ++i; }
-        }
+        return SwapMathLib.validateSwapInputs(
+            baseToken, MAX_PATH_LENGTH, path, fees, amountIn, minAmountOut, deadline, false
+        );
     }
 
     /// @notice Internal function to execute swap through multiple pools along path
@@ -198,7 +165,7 @@ contract BofhContractV2 is BofhContractBase, IBofhContract {
             });
 
             // Transfer initial amount from user (Phase 3: optimized)
-            _safeTransferFrom(cachedBaseToken, msg.sender, address(this), amountIn);
+            SwapMathLib.safeTransferFrom(cachedBaseToken, msg.sender, address(this), amountIn);
         }
 
         // Execute swaps along the path (legacy single-DEX: every hop uses the immutable factory).
@@ -230,7 +197,7 @@ contract BofhContractV2 is BofhContractBase, IBofhContract {
         if (priceImpact > maxPriceImpact) revert ExcessiveSlippage();
 
         // Transfer profit to recipient (Phase 3: optimized)
-        _safeTransfer(baseToken, recipient, state.currentAmount);
+        SwapMathLib.safeTransfer(baseToken, recipient, state.currentAmount);
 
         emit SwapExecuted(
             msg.sender,
@@ -439,7 +406,7 @@ contract BofhContractV2 is BofhContractBase, IBofhContract {
             // FoT-aware entry sizing: size the first hop on the RECEIVED baseToken, not the
             // nominal amountIn. For non-FoT tokens received == amountIn (byte-identical behavior).
             uint256 balBefore = IBEP20(cachedBaseToken).balanceOf(address(this));
-            _safeTransferFrom(cachedBaseToken, msg.sender, address(this), amountIn);
+            SwapMathLib.safeTransferFrom(cachedBaseToken, msg.sender, address(this), amountIn);
             uint256 received = IBEP20(cachedBaseToken).balanceOf(address(this)) - balBefore;
 
             state = SwapState({
@@ -464,7 +431,7 @@ contract BofhContractV2 is BofhContractBase, IBofhContract {
         if (priceImpact > maxPriceImpact) revert ExcessiveSlippage();
 
         // Transfer profit to caller
-        _safeTransfer(baseToken, msg.sender, state.currentAmount);
+        SwapMathLib.safeTransfer(baseToken, msg.sender, state.currentAmount);
 
         emit SwapExecuted(
             msg.sender,
@@ -518,35 +485,11 @@ contract BofhContractV2 is BofhContractBase, IBofhContract {
         uint256 minAmountOut,
         uint256 deadline
     ) private view returns (uint256 pathLength) {
-        // 1. Deadline validation
-        if (deadline == 0) revert InvalidAmount();
-        if (block.timestamp > deadline) revert DeadlineExpired();
-
-        // 2. Array length validation
-        pathLength = path.length;
-        if (pathLength == 0) revert InvalidArrayLength();
-        if (pathLength < 2 || pathLength > MAX_PATH_LENGTH) revert InvalidPath();
-        if (pathLength != fees.length + 1) revert InvalidArrayLength();
-
-        // 3. Amount validation
-        if (amountIn == 0) revert InvalidAmount();
-        if (minAmountOut == 0) revert InvalidAmount();
-
-        // 4. Path address validation
-        for (uint256 i = 0; i < pathLength;) {
-            if (path[i] == address(0)) revert InvalidAddress();
-            unchecked { ++i; }
-        }
-
-        // 5. Path structure validation (cache baseToken to avoid double SLOAD)
-        address cachedBaseToken = baseToken;
-        if (path[0] != cachedBaseToken || path[pathLength - 1] != cachedBaseToken) revert InvalidPath();
-
-        // 6. Fee validation: concrete fees capped at MAX_FEE_BPS; the registry-fee sentinel is allowed
-        for (uint256 i = 0; i < fees.length;) {
-            if (fees[i] != USE_REGISTRY_FEE && fees[i] > MAX_FEE_BPS) revert InvalidFee();
-            unchecked { ++i; }
-        }
+        // allowRegistrySentinel=true permits a fees[i] == USE_REGISTRY_FEE per hop (use registry fee);
+        // a concrete fee is still capped at MAX_FEE_BPS. Otherwise byte-identical to _validateSwapInputs.
+        return SwapMathLib.validateSwapInputs(
+            baseToken, MAX_PATH_LENGTH, path, fees, amountIn, minAmountOut, deadline, true
+        );
     }
 
     /// @notice Execute a single step in a multi-hop swap path
@@ -576,93 +519,22 @@ contract BofhContractV2 is BofhContractBase, IBofhContract {
         address pairFactory,
         bool fotSafe
     ) private returns (SwapState memory) {
-        // Defense-in-depth: the pricing computes (10000 - feeBps). Callers reach this private helper
-        // only via validated entrypoints (fees[i] <= MAX_FEE_BPS), but re-check so the subtraction
-        // can never underflow if a future caller forgets.
-        if (feeBps > MAX_FEE_BPS) revert InvalidFee();
-
-        // Get the pair address for these two tokens from the supplied factory (DEX-specific)
-        address pairAddress = _getPairFrom(pairFactory, tokenIn, tokenOut);
-
-        // Analyze pool state using the pair address
-        PoolLib.PoolState memory pool = PoolLib.analyzePool(
-            pairAddress,
+        // Delegate the per-hop mechanics (pair resolution, pool analysis/validation, pricing, pre-fund,
+        // swap, balanceOf-delta sizing) to SwapMathLib.executeHop. It is `internal` (inlined), so the
+        // token-flow order, the CPMM-with-fee formula, and gas are byte-identical to the prior in-line
+        // implementation. The contract retains the SwapState struct and only writes back the results.
+        (state.currentAmount, state.cumulativeImpact) = SwapMathLib.executeHop(
+            pairFactory,
             tokenIn,
+            tokenOut,
+            feeBps,
             state.currentAmount,
-            block.timestamp
+            state.cumulativeImpact,
+            maxPriceImpact,
+            MAX_SLIPPAGE,
+            fotSafe
         );
-
-        // Calculate optimal swap parameters
-        PoolLib.SwapParams memory params = PoolLib.SwapParams({
-            amountIn: state.currentAmount,
-            minAmountOut: 0, // Calculated dynamically
-            maxPriceImpact: maxPriceImpact,
-            deadline: block.timestamp + 1, // Immediate execution
-            maxSlippage: MAX_SLIPPAGE
-        });
-
-        // Validate pool state
-        if (!PoolLib.validateSwap(pool, params)) revert InvalidSwapParameters();
-
-        // Add price impact (keep in Solidity for struct access simplicity)
-        unchecked {
-            state.cumulativeImpact += pool.priceImpact;
-        }
-
-        if (fotSafe) {
-            // FoT-safe: transfer first, size output on the amount the PAIR actually received.
-            // Works for fee-on-transfer tokens at any hop; for normal tokens received == sent.
-            uint256 pairInBefore = IBEP20(tokenIn).balanceOf(pairAddress);
-            _safeTransfer(tokenIn, pairAddress, state.currentAmount);
-            uint256 pairReceived = IBEP20(tokenIn).balanceOf(pairAddress) - pairInBefore;
-
-            // Same CPMM-with-fee formula/operation-order as the legacy assembly below.
-            uint256 amountInWithFee = pairReceived * (10000 - feeBps);
-            uint256 expectedOutput =
-                (amountInWithFee * pool.reserveOut) / (pool.reserveIn * 10000 + amountInWithFee);
-
-            uint256 balanceBefore = IBEP20(tokenOut).balanceOf(address(this));
-            IGenericPair(pairAddress).swap(
-                pool.sellingToken0 ? 0 : expectedOutput,
-                pool.sellingToken0 ? expectedOutput : 0,
-                address(this),
-                new bytes(0)
-            );
-            state.currentAmount = IBEP20(tokenOut).balanceOf(address(this)) - balanceBefore;
-            state.currentToken = tokenOut;
-            return state;
-        }
-
-        // Legacy path (byte-identical): assembly pricing on state.currentAmount, then pre-fund + swap.
-        // amountOut = (amountIn * reserveOut * (10000 - feeBps)) /
-        //             (reserveIn * 10000 + amountIn * (10000 - feeBps))
-        uint256 legacyExpectedOutput;
-        assembly {
-            let amountIn := mload(add(state, 0x20)) // state.currentAmount
-            let reserveOut := mload(add(pool, 0x20)) // pool.reserveOut
-            let reserveIn := mload(pool) // pool.reserveIn
-            let feeNum := sub(10000, feeBps)
-            let amountInWithFee := mul(amountIn, feeNum)
-            let numerator := mul(amountInWithFee, reserveOut)
-            let denominator := add(mul(reserveIn, 10000), amountInWithFee)
-            legacyExpectedOutput := div(numerator, denominator)
-        }
-
-        // Transfer tokens to the pair contract (Uniswap V2 pattern)
-        _safeTransfer(tokenIn, pairAddress, state.currentAmount);
-
-        {
-            uint256 balanceBefore = IBEP20(tokenOut).balanceOf(address(this));
-            IGenericPair(pairAddress).swap(
-                pool.sellingToken0 ? 0 : legacyExpectedOutput,
-                pool.sellingToken0 ? legacyExpectedOutput : 0,
-                address(this),
-                new bytes(0)
-            );
-            state.currentAmount = IBEP20(tokenOut).balanceOf(address(this)) - balanceBefore;
-        }
         state.currentToken = tokenOut;
-
         return state;
     }
 
@@ -739,7 +611,7 @@ contract BofhContractV2 is BofhContractBase, IBofhContract {
         if (fees.length != path.length - 1) revert InvalidArrayLength();
 
         // Simulate the full path (tracking per-pair reserve changes) so the result equals exec.
-        (expectedOutput, priceImpact) = _simulatePath(path, fees, amounts[0]);
+        (expectedOutput, priceImpact) = SwapMathLib.simulatePath(factory, path, fees, amounts[0]);
 
         unchecked {
             optimalityScore = (expectedOutput * PRECISION) / amounts[0];
@@ -774,7 +646,7 @@ contract BofhContractV2 is BofhContractBase, IBofhContract {
         // Resolve per-hop factories + effective fees into memory arrays, then simulate (sub-calls
         // keep the four calldata arrays off the stack during the loop -> avoids "stack too deep").
         (address[] memory factories, uint256[] memory hopFees) = _resolveHops(dexIds, fees);
-        (expectedOutput, priceImpact) = _simulatePathMultiDex(path, factories, hopFees, amounts[0]);
+        (expectedOutput, priceImpact) = SwapMathLib.simulatePathMultiDex(path, factories, hopFees, amounts[0]);
 
         unchecked {
             optimalityScore = (expectedOutput * PRECISION) / amounts[0];
@@ -817,170 +689,10 @@ contract BofhContractV2 is BofhContractBase, IBofhContract {
         if (hopFee > MAX_FEE_BPS) revert InvalidFee();
     }
 
-    /// @notice Simulate a single-DEX path (all hops via the immutable factory) with reserve tracking
-    /// @dev Mirrors realized execution EXACTLY: prices each hop with the CPMM-with-fee formula and
-    /// @dev updates the pool's simulated reserves, so revisited pools (e.g. BASE->A->BASE) match exec.
-    /// @param path Token path
-    /// @param fees Per-hop fees in basis points (each validated <= MAX_FEE_BPS here)
-    /// @param amountIn Initial input amount
-    /// @return expectedOutput Final output after all hops
-    /// @return cumulativeImpact Accumulated price impact across hops
-    function _simulatePath(
-        address[] calldata path,
-        uint256[] calldata fees,
-        uint256 amountIn
-    ) private view returns (uint256 expectedOutput, uint256 cumulativeImpact) {
-        uint256 hops = path.length - 1;
-        SimReserve[] memory sims = new SimReserve[](hops);
-        uint256 simCount;
-        expectedOutput = amountIn;
-
-        for (uint256 i = 0; i < hops;) {
-            if (fees[i] > MAX_FEE_BPS) revert InvalidFee();
-            (expectedOutput, cumulativeImpact, simCount) = _simHop(
-                _getPairFrom(factory, path[i], path[i + 1]),
-                path[i],
-                expectedOutput,
-                fees[i],
-                cumulativeImpact,
-                sims,
-                simCount
-            );
-            unchecked { ++i; }
-        }
-    }
-
-    /// @notice Simulate a multi-DEX path (per-hop factories) with reserve tracking
-    /// @dev Same reserve-tracking simulation as _simulatePath but each hop uses factories[i].
-    /// @param path Token path
-    /// @param factories Per-hop resolved factory addresses
-    /// @param hopFees Per-hop effective fees in basis points
-    /// @param amountIn Initial input amount
-    /// @return expectedOutput Final output after all hops
-    /// @return cumulativeImpact Accumulated price impact across hops
-    function _simulatePathMultiDex(
-        address[] calldata path,
-        address[] memory factories,
-        uint256[] memory hopFees,
-        uint256 amountIn
-    ) private view returns (uint256 expectedOutput, uint256 cumulativeImpact) {
-        uint256 hops = path.length - 1;
-        SimReserve[] memory sims = new SimReserve[](hops);
-        uint256 simCount;
-        expectedOutput = amountIn;
-
-        for (uint256 i = 0; i < hops;) {
-            (expectedOutput, cumulativeImpact, simCount) = _simHop(
-                _getPairFrom(factories[i], path[i], path[i + 1]),
-                path[i],
-                expectedOutput,
-                hopFees[i],
-                cumulativeImpact,
-                sims,
-                simCount
-            );
-            unchecked { ++i; }
-        }
-    }
-
-    /// @notice Price one simulated hop, tracking the pool's reserves so revisits match exec
-    /// @dev On first encounter of a pair, seeds simulated reserves from live reserves (oriented to
-    /// @dev this hop's tokenIn). Computes amountOut with the same operation order as executePathStep,
-    /// @dev accumulates price impact on the pre-hop reserves, then updates the simulated reserves.
-    /// @param pairAddress Resolved pair for this hop
-    /// @param tokenIn Input token for this hop
-    /// @param amountIn Input amount for this hop
-    /// @param feeBps Per-hop fee in basis points
-    /// @param cumulativeImpact Running cumulative price impact
-    /// @param sims Memory array of tracked pair reserve states
-    /// @param simCount Number of populated entries in sims
-    /// @return amountOut Output amount for this hop
-    /// @return newCumulativeImpact Updated cumulative price impact
-    /// @return newSimCount Updated number of populated sims entries
-    function _simHop(
-        address pairAddress,
-        address tokenIn,
-        uint256 amountIn,
-        uint256 feeBps,
-        uint256 cumulativeImpact,
-        SimReserve[] memory sims,
-        uint256 simCount
-    ) private view returns (uint256 amountOut, uint256 newCumulativeImpact, uint256 newSimCount) {
-        // Locate (or seed) this pair's simulated reserves in canonical token0/token1 orientation.
-        (uint256 idx, bool found) = _findSim(pairAddress, sims, simCount);
-        newSimCount = simCount;
-        if (!found) {
-            // First encounter: read live reserves canonically (token0/token1).
-            (uint256 r0, uint256 r1) = _liveReserves(pairAddress);
-            idx = simCount;
-            sims[idx] = SimReserve({pair: pairAddress, reserve0: r0, reserve1: r1});
-            unchecked { newSimCount = simCount + 1; }
-        }
-
-        // Orient to this hop's input token.
-        bool inIsToken0 = (tokenIn == IGenericPair(pairAddress).token0());
-        uint256 reserveIn = inIsToken0 ? sims[idx].reserve0 : sims[idx].reserve1;
-        uint256 reserveOut = inIsToken0 ? sims[idx].reserve1 : sims[idx].reserve0;
-
-        // Price impact on pre-hop reserves (matches PoolLib._calculatePriceImpactInline math).
-        unchecked {
-            newCumulativeImpact = cumulativeImpact + _priceImpact(amountIn, reserveIn, reserveOut);
-        }
-
-        // Same formula/operation-order as executePathStep's assembly so view == realized exec.
-        uint256 amountInWithFee = amountIn * (10000 - feeBps);
-        amountOut = (amountInWithFee * reserveOut) / (reserveIn * 10000 + amountInWithFee);
-
-        // Update simulated reserves (canonical orientation) for any later revisit on the path.
-        if (inIsToken0) {
-            sims[idx].reserve0 = reserveIn + amountIn;
-            sims[idx].reserve1 = reserveOut - amountOut;
-        } else {
-            sims[idx].reserve1 = reserveIn + amountIn;
-            sims[idx].reserve0 = reserveOut - amountOut;
-        }
-    }
-
-    /// @notice Find a pair's index in the tracked sims array
-    /// @param pairAddress Pair to look up
-    /// @param sims Tracked pair states
-    /// @param simCount Populated entries in sims
-    /// @return idx Index of the pair (valid only when found)
-    /// @return found True if the pair is already tracked
-    function _findSim(
-        address pairAddress,
-        SimReserve[] memory sims,
-        uint256 simCount
-    ) private pure returns (uint256 idx, bool found) {
-        for (uint256 j = 0; j < simCount;) {
-            if (sims[j].pair == pairAddress) return (j, true);
-            unchecked { ++j; }
-        }
-        return (0, false);
-    }
-
-    /// @notice Read a pair's live reserves in canonical token0/token1 orientation
-    /// @param pairAddress Pair to read
-    /// @return reserve0 Reserve of token0
-    /// @return reserve1 Reserve of token1
-    function _liveReserves(address pairAddress) private view returns (uint256 reserve0, uint256 reserve1) {
-        (reserve0, reserve1, ) = IGenericPair(pairAddress).getReserves();
-    }
-
-    /// @notice Price impact for a hop, matching PoolLib._calculatePriceImpactInline exactly
-    /// @param amountIn Input amount
-    /// @param reserveIn Input token reserve
-    /// @param reserveOut Output token reserve
-    /// @return Price impact scaled by PRECISION
-    function _priceImpact(uint256 amountIn, uint256 reserveIn, uint256 reserveOut) private pure returns (uint256) {
-        if (amountIn == 0) return 0;
-        uint256 newReserveIn = reserveIn + amountIn;
-        uint256 newReserveOut = (reserveIn * reserveOut) / newReserveIn;
-        uint256 oldPrice = (reserveOut * PRECISION) / reserveIn;
-        uint256 newPrice = (newReserveOut * PRECISION) / newReserveIn;
-        if (newPrice >= oldPrice) return 0;
-        return ((oldPrice - newPrice) * PRECISION) / oldPrice;
-    }
+    // The fee-aware path-simulation helpers (simulatePath / simulatePathMultiDex / simHop / findSim /
+    // liveReserves / priceImpact) and the SimReserve type live in SwapMathLib. They are pure/view and
+    // read no contract storage, so getOptimalPathMetricsWithFees/getOptimalPathMetricsMultiDex call
+    // SwapMathLib.simulatePath(factory, ...) / SwapMathLib.simulatePathMultiDex(...) directly.
 
     /// @notice Get pair address for two tokens from the contract's immutable factory
     /// @dev Thin wrapper over _getPairFrom for legacy callers (getOptimalPathMetrics). Byte-identical
@@ -1028,105 +740,5 @@ contract BofhContractV2 is BofhContractBase, IBofhContract {
     /// @return The address of the factory
     function getFactory() external view returns (address) {
         return factory;
-    }
-
-    /// @notice Safe token transferFrom using low-level call for gas optimization
-    /// @dev Phase 3 optimization: Assembly-based transferFrom with proper error handling
-    /// @param token Token address to transfer from
-    /// @param from Address to transfer from
-    /// @param to Recipient address
-    /// @param amount Amount to transfer
-    function _safeTransferFrom(address token, address from, address to, uint256 amount) private {
-        assembly {
-            // Get free memory pointer
-            let ptr := mload(0x40)
-
-            // Store transferFrom(address,address,uint256) selector: 0x23b872dd
-            mstore(ptr, 0x23b872dd00000000000000000000000000000000000000000000000000000000)
-            mstore(add(ptr, 0x04), from)
-            mstore(add(ptr, 0x24), to)
-            mstore(add(ptr, 0x44), amount)
-
-            // Call transferFrom function
-            let success := call(
-                gas(),      // Forward all gas
-                token,      // Token address
-                0,          // No ETH value
-                ptr,        // Input data pointer
-                0x64,       // Input size: 4 (selector) + 32 (from) + 32 (to) + 32 (amount)
-                ptr,        // Output pointer (reuse input)
-                0x20        // Output size: 32 bytes (bool)
-            )
-
-            // Check if call succeeded and returned true
-            switch returndatasize()
-            case 0 {
-                // No return data
-                if iszero(success) {
-                    // Revert with TransferFailed()
-                    mstore(ptr, 0x90b8ec1800000000000000000000000000000000000000000000000000000000)
-                    revert(ptr, 0x04)
-                }
-            }
-            default {
-                // Token returned data - check if it's true
-                let returnValue := mload(ptr)
-                if or(iszero(success), iszero(returnValue)) {
-                    // Revert with TransferFailed()
-                    mstore(ptr, 0x90b8ec1800000000000000000000000000000000000000000000000000000000)
-                    revert(ptr, 0x04)
-                }
-            }
-        }
-    }
-
-    /// @notice Safe token transfer using low-level call for gas optimization
-    /// @dev Phase 3 optimization: Assembly-based transfer with proper error handling
-    /// @param token Token address to transfer
-    /// @param to Recipient address
-    /// @param amount Amount to transfer
-    function _safeTransfer(address token, address to, uint256 amount) private {
-        assembly {
-            // Get free memory pointer
-            let ptr := mload(0x40)
-
-            // Store transfer(address,uint256) selector: 0xa9059cbb
-            mstore(ptr, 0xa9059cbb00000000000000000000000000000000000000000000000000000000)
-            mstore(add(ptr, 0x04), to)
-            mstore(add(ptr, 0x24), amount)
-
-            // Call transfer function
-            let success := call(
-                gas(),      // Forward all gas
-                token,      // Token address
-                0,          // No ETH value
-                ptr,        // Input data pointer
-                0x44,       // Input size: 4 (selector) + 32 (to) + 32 (amount)
-                ptr,        // Output pointer (reuse input)
-                0x20        // Output size: 32 bytes (bool)
-            )
-
-            // Check if call succeeded and returned true
-            // Some tokens return nothing, so we check returndatasize
-            switch returndatasize()
-            case 0 {
-                // No return data - token doesn't return bool (e.g., USDT)
-                // Just check if call succeeded
-                if iszero(success) {
-                    // Revert with TransferFailed()
-                    mstore(ptr, 0x90b8ec1800000000000000000000000000000000000000000000000000000000)
-                    revert(ptr, 0x04)
-                }
-            }
-            default {
-                // Token returned data - check if it's true
-                let returnValue := mload(ptr)
-                if or(iszero(success), iszero(returnValue)) {
-                    // Revert with TransferFailed()
-                    mstore(ptr, 0x90b8ec1800000000000000000000000000000000000000000000000000000000)
-                    revert(ptr, 0x04)
-                }
-            }
-        }
     }
 }
