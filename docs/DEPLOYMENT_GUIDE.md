@@ -450,7 +450,6 @@ Setup alerts for:
 Recommended tools:
 - Tenderly for transaction monitoring
 - OpenZeppelin Defender for automated alerts
-- Custom Grafana dashboards (see monitoring/)
 
 ## Troubleshooting
 
@@ -608,7 +607,6 @@ Current contract is **not upgradeable**. To upgrade:
 - Deployment: `scripts/deploy.js`
 - Verification: `scripts/verify.js`
 - Configuration: `scripts/configure.js`
-- Monitoring: `scripts/monitoring/`
 
 ### External Resources
 

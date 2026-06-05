@@ -12,7 +12,7 @@
 ### Critical Actions Required
 
 - [ ] **Rotate BSCScan API Key** (CRITICAL - MUST DO FIRST)
-  - Current exposed key: `CYQ9FQGEKRIHZ4RXFDPFYERJPIXZNZFXD9`
+  - Current exposed key: `<REDACTED>`
   - Action: Visit https://bscscan.com/myapikey
   - Rotate the exposed key
   - Copy new API key

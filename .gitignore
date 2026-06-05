@@ -209,3 +209,10 @@ dev-prompts/
 # Monitoring outputs
 monitoring-output/
 *.monitoring.log
+
+# ============================================
+# Local knowledge base (not shared)
+# ============================================
+# CLAUDE.md is a local-only, machine-generated project knowledge base.
+# Kept on disk for Claude Code sessions, intentionally untracked.
+CLAUDE.md
