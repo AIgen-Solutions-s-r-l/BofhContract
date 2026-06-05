@@ -26,6 +26,8 @@
 const { ethers } = require('ethers');
 const { getAmountOut } = require('./pathfinder.js');
 const { gasCostForCycle, compareExecutors } = require('./gasModel.js');
+const { optimalInputCapped } = require('./sizing.js');
+const { checkToken } = require('./tokenSafety.js');
 
 /**
  * Simulate a full round-trip cycle for a given input amount.
@@ -43,76 +45,44 @@ function simulateCycle(amountIn, hops) {
 }
 
 /**
- * Find a near-optimal input size by golden-section-free coarse+refine search.
- * (A closed-form optimum exists for 2-pool cycles and is extendable hop-by-hop — TODO to
- * implement exactly; this bounded search is robust for the skeleton and >2 hops.)
+ * Find a near-optimal input size, HARD-CAPPED by pool reserves and a max-price-impact budget.
  *
- * Profit(x) = simulateCycle(x) - x is unimodal in x for CPMM cycles, so a ternary/grid
- * search converges. We grid-search in log space then refine around the best point.
+ * This now delegates to sizing.optimalInputCapped (PLAY #3): the old version capped only at
+ * the FIRST hop's reserve and ignored price impact, which over-sizes catastrophically in thin
+ * fresh pools. The capped sizer bounds the input by (a) reserveCapFraction × the THINNEST
+ * hop's input reserve and (b) the largest size whose cumulative round-trip impact stays under
+ * maxPriceImpactBps, then maximises gross profit (unimodal grid+ternary) inside that interval.
+ *
+ * Backward-compatible shape: returns { amountIn, amountOut, grossProfitWei } plus extra
+ * cap/impact fields the evaluator surfaces. `opts.sizingCfg` overrides the sizing knobs
+ * (config.sizing). `opts.maxInputWei` (legacy) further tightens the reserve cap if smaller.
  *
  * @param {Array<object>} hops
- * @param {{ maxInputWei?: bigint }} [opts]
- * @returns {{ amountIn: bigint, amountOut: bigint, grossProfitWei: bigint }}
+ * @param {{ maxInputWei?: bigint, sizingCfg?: object }} [opts]
+ * @returns {{ amountIn:bigint, amountOut:bigint, grossProfitWei:bigint,
+ *   reserveCapWei:bigint, impactCapWei:bigint, hardCapWei:bigint,
+ *   priceImpactBps:number, boundBy:string }}
  */
 function optimalInput(hops, opts = {}) {
-  if (!hops || hops.length === 0) return { amountIn: 0n, amountOut: 0n, grossProfitWei: 0n };
-
-  // Upper bound: a fraction of the smallest base-side reserve on the first hop keeps us in
-  // the regime where the cycle can be profitable (huge size always self-destructs via impact).
-  const firstReserveIn = BigInt(hops[0].reserveIn);
-  // Cap the search at the first hop's base-side reserve: trading more than the pool holds
-  // is always self-defeating (price impact dominates). The true optimum is typically a
-  // small fraction of this, so the grid below is GEOMETRIC (log-spaced) to sample the
-  // profitable low region densely instead of wasting points on the deep-negative high end.
-  const hardCap = opts.maxInputWei || firstReserveIn;
-  if (hardCap <= 0n) return { amountIn: 0n, amountOut: 0n, grossProfitWei: 0n };
-
-  const profitAt = (x) => {
-    if (x <= 0n) return -1n;
-    const out = simulateCycle(x, hops);
-    return out - x;
-  };
-
-  // Geometric grid over [lo, hardCap]: x_i = lo * (hardCap/lo)^(i/steps). Profit(x) is
-  // unimodal for a CPMM cycle, so the grid brackets the optimum; we refine with ternary.
-  const lo = hardCap / 100000000n > 0n ? hardCap / 100000000n : 1n;
-  const steps = 80;
-  const loF = Number(lo);
-  const ratio = Number(hardCap) / loF; // hardCap/lo as a float for exponent spacing
-  let best = { amountIn: lo, profit: profitAt(lo) };
-  for (let i = 1; i <= steps; i++) {
-    const xF = loF * Math.pow(ratio, i / steps);
-    const x = BigInt(Math.max(1, Math.round(xF)));
-    const p = profitAt(x);
-    if (p > best.profit) best = { amountIn: x, profit: p };
+  if (!hops || hops.length === 0) {
+    return {
+      amountIn: 0n, amountOut: 0n, grossProfitWei: 0n,
+      reserveCapWei: 0n, impactCapWei: 0n, hardCapWei: 0n, priceImpactBps: 0, boundBy: 'interior'
+    };
   }
-
-  // Ternary refine in the bracket [best/4, best*4] (clamped), where Profit is unimodal.
-  let left = best.amountIn / 4n > 0n ? best.amountIn / 4n : 1n;
-  let right = best.amountIn * 4n < hardCap ? best.amountIn * 4n : hardCap;
-  for (let iter = 0; iter < 200 && right - left > 1n; iter++) {
-    const third = (right - left) / 3n;
-    const m1 = left + third;
-    const m2 = right - third;
-    if (profitAt(m1) < profitAt(m2)) {
-      left = m1 + 1n;
-    } else {
-      right = m2;
+  const sized = optimalInputCapped(hops, opts.sizingCfg || {});
+  // Legacy explicit ceiling (API stability): if the caller passed a tighter maxInputWei than
+  // the sizer's chosen optimum, clamp the input down to it and recompute the output. Profit(x)
+  // is unimodal and the cap sits left of the optimum, so the clamped point is the best feasible
+  // input under the explicit ceiling.
+  if (opts.maxInputWei) {
+    const cap = BigInt(opts.maxInputWei);
+    if (cap > 0n && sized.amountIn > cap) {
+      const out = simulateCycle(cap, hops);
+      return { ...sized, amountIn: cap, amountOut: out, grossProfitWei: out - cap, hardCapWei: cap, boundBy: 'explicit' };
     }
   }
-  // Pick the best of {grid winner, refined endpoints}.
-  const candidatesX = [best.amountIn, left, right];
-  let xStar = candidatesX[0];
-  let pStar = profitAt(xStar);
-  for (const x of candidatesX.slice(1)) {
-    const p = profitAt(x);
-    if (p > pStar) {
-      pStar = p;
-      xStar = x;
-    }
-  }
-  const outStar = simulateCycle(xStar, hops);
-  return { amountIn: xStar, amountOut: outStar, grossProfitWei: outStar - xStar };
+  return sized;
 }
 
 /**
@@ -133,15 +103,17 @@ function weiToUsd(wei, nativeUsdPrice) {
 }
 
 /**
- * Evaluate a single candidate cycle: size it, simulate, and net out gas for BOTH executors.
+ * Evaluate a single candidate cycle: size it (liquidity- + impact-capped), simulate, and net
+ * out gas for BOTH executors.
  * @param {object} candidate - { tokens, hops, marginalEdgePct }.
  * @param {object} gasCfg - config.gas.
+ * @param {object} [sizingCfg] - config.sizing (reserveCapFraction, maxPriceImpactBps).
  * @returns {object} evaluation record.
  */
-function evaluateCandidate(candidate, gasCfg) {
+function evaluateCandidate(candidate, gasCfg, sizingCfg = {}) {
   const hops = candidate.hops;
   const hopCount = hops.length;
-  const sized = optimalInput(hops);
+  const sized = optimalInput(hops, { sizingCfg });
 
   const grossUsd = weiToUsd(sized.grossProfitWei, gasCfg.nativeUsdPrice);
   const gasFat = gasCostForCycle(hopCount, gasCfg, 'bofhV2');
@@ -158,6 +130,11 @@ function evaluateCandidate(candidate, gasCfg) {
     amountOutWei: sized.amountOut.toString(),
     grossProfitWei: sized.grossProfitWei.toString(),
     grossUsd,
+    // PLAY #3 sizing transparency: which constraint bound the size + realised impact.
+    sizeBoundBy: sized.boundBy,
+    priceImpactBps: sized.priceImpactBps,
+    reserveCapWei: sized.reserveCapWei.toString(),
+    impactCapWei: sized.impactCapWei.toString(),
     gasUsdFat: gasFat.costUsd,
     gasUsdLean: gasLean.costUsd,
     netUsdFat,
@@ -168,6 +145,139 @@ function evaluateCandidate(candidate, gasCfg) {
     profitableLean: netUsdLean > 0,
     onlyLeanProfitable: netUsdLean > 0 && netUsdFat <= 0
   };
+}
+
+/**
+ * For a candidate cycle, enumerate EACH distinct non-base token T and (where derivable) a
+ * clean-CPMM base<->token baseline for the token-safety guard's PER-TOKEN probe (PLAY #4).
+ *
+ * SEMANTICS FIX (was apples-to-oranges): the token-safety probe is a 2-hop base<->token
+ * round-trip (base->T->base), NOT a measurement over a whole >2-hop cycle. So a token's
+ * baseline must come from a hop that pairs T DIRECTLY with the base token, never from interior
+ * token-to-token hops of a longer cycle (those are different pools with their own fee/impact —
+ * comparing the live base<->token quote against them would fabricate a meaningless "tax").
+ *
+ *   - buyPool  is set ONLY from a hop base->T  (from===base, to===T).
+ *   - sellPool is set ONLY from a hop T->base  (from===T,   to===base).
+ * If a token is paired directly with base on the cycle (the typical first/last leg of a
+ * baseToken-anchored cycle), both are available and tax is measurable apples-to-apples. For an
+ * INTERIOR token with no direct base pairing on this cycle, we have no base<->token reserves
+ * offline → buyPool/sellPool are left null. The guard then SKIPS the (unmeasurable) tax math
+ * for that token but STILL runs the live honeypot / sell-revert probe (which needs no baseline
+ * and applies to every non-base token regardless of cycle position). Obtaining the interior
+ * token's real base<->token reserves for an offline tax baseline is a TODO (needs a pool
+ * lookup / RPC); live mode covers the honeypot signal today.
+ *
+ * @param {object} candidate - { tokens, hops }.
+ * @param {string} baseToken
+ * @returns {Array<{ token:string, buyPool:(object|null), sellPool:(object|null), directBasePair:boolean }>}
+ */
+function tokenSafetyTargets(candidate, baseToken) {
+  const hops = candidate.hops;
+  const baseKey = baseToken.toLowerCase();
+  const out = [];
+  // A token T's base<->token BUY pool is a hop base->T; its base<->token SELL pool is T->base.
+  const buyFromBase = new Map(); // T -> hop (base -> T)
+  const sellToBase = new Map(); // T -> hop (T -> base)
+  for (const h of hops) {
+    const fromKey = h.from.toLowerCase();
+    const toKey = h.to.toLowerCase();
+    if (fromKey === baseKey && toKey !== baseKey) buyFromBase.set(toKey, h);
+    if (toKey === baseKey && fromKey !== baseKey) sellToBase.set(fromKey, h);
+  }
+  const seen = new Set();
+  for (const h of hops) {
+    for (const t of [h.from, h.to]) {
+      const key = t.toLowerCase();
+      if (key === baseKey || seen.has(key)) continue;
+      seen.add(key);
+      const buyHop = buyFromBase.get(key);
+      const sellHop = sellToBase.get(key);
+      const directBasePair = !!(buyHop && sellHop);
+      out.push({
+        token: t,
+        // BUY pool (base->T): base-side=reserveIn, token-side=reserveOut. Null unless T is
+        // directly paired with base on this cycle (apples-to-apples baseline requirement).
+        buyPool: directBasePair
+          ? { reserveBase: BigInt(buyHop.reserveIn), reserveToken: BigInt(buyHop.reserveOut), feeBps: buyHop.feeBps }
+          : null,
+        // SELL pool (T->base): token-side=reserveIn, base-side=reserveOut.
+        sellPool: directBasePair
+          ? { reserveToken: BigInt(sellHop.reserveIn), reserveBase: BigInt(sellHop.reserveOut), feeBps: sellHop.feeBps }
+          : null,
+        directBasePair
+      });
+    }
+  }
+  return out;
+}
+
+/**
+ * HARD token-safety GATE (PLAY #4) applied BEFORE a candidate is evaluated/fired.
+ *
+ * For EACH distinct non-base token on the cycle, run the PER-TOKEN base<->token buy-then-sell
+ * probe (tokenSafety.checkToken) INDEPENDENTLY. A candidate is DROPPED if ANY one of its
+ * tokens fails (honeypot / sell-block / over-limit transfer tax / max-tx). This is a per-token
+ * 2-hop probe, not a single whole-cycle measurement: a 3–5 hop cycle is only as safe as its
+ * most dangerous token, and the honeypot/sell-revert signal (which needs no CPMM baseline)
+ * covers interior tokens too. Dropped candidates are COUNTED and never evaluated.
+ *
+ * MODES:
+ *  - Live: pass `opts.provider` (+ `opts.router` for getAmountsOut). The guard runs the real
+ *    eth_call round-trip per token. This is async.
+ *  - Offline (demo/tests): with no provider, the guard has no real round-trip data, so by
+ *    policy it does NOT hard-fail clean tokens (it only fails on POSITIVE evidence). This keeps
+ *    the offline pipeline runnable while the gate is fully active the moment a provider is
+ *    wired. An optional `opts.injectedSafety` map (tokenAddr->precomputed) lets tests drive
+ *    deterministic failures through the SAME code path.
+ *
+ * @param {object[]} candidates
+ * @param {string} baseToken
+ * @param {object} [opts] - { provider, router, tokenSafetyCfg, probeAmountInWei, injectedSafety }
+ * @returns {Promise<{ safe:object[], dropped:object[], byToken:object[] }>}
+ */
+async function gateTokenSafety(candidates, baseToken, opts = {}) {
+  const safe = [];
+  const dropped = [];
+  const byToken = [];
+  if (!baseToken) {
+    // Without a base token we can't orient buy/sell pools; pass through but flag.
+    return { safe: candidates.slice(), dropped: [], byToken: [{ note: 'no baseToken — token-safety gate skipped' }] };
+  }
+  const probeAmount = opts.probeAmountInWei ? BigInt(opts.probeAmountInWei) : (10n ** 18n) / 100n; // 0.01 base default
+
+  for (const cand of candidates) {
+    const targets = tokenSafetyTargets(cand, baseToken);
+    let candSafe = true;
+    const candReasons = [];
+    for (const tgt of targets) {
+      const injected = opts.injectedSafety ? opts.injectedSafety[tgt.token.toLowerCase()] : undefined;
+      const res = await checkToken(
+        {
+          provider: opts.provider,
+          router: opts.router,
+          baseToken,
+          token: tgt.token,
+          amountIn: probeAmount,
+          buyPool: tgt.buyPool,
+          sellPool: tgt.sellPool,
+          precomputed: injected
+        },
+        opts.tokenSafetyCfg || {}
+      );
+      byToken.push({ token: tgt.token, safe: res.safe, measuredSellTax: res.measuredSellTax, fidelity: res.fidelity, reasons: res.reasons });
+      if (!res.safe) {
+        candSafe = false;
+        candReasons.push(`${tgt.token}: ${res.reasons.join('; ')}`);
+      }
+    }
+    if (candSafe) {
+      safe.push(cand);
+    } else {
+      dropped.push({ candidate: cand, reasons: candReasons });
+    }
+  }
+  return { safe, dropped, byToken };
 }
 
 /**
@@ -182,12 +292,14 @@ function evaluateCandidate(candidate, gasCfg) {
  *
  * @param {object[]} evals - evaluateCandidate() records.
  * @param {object} killCfg - config.kill.
- * @param {{ windowDays?: number, revertRate?: number }} [obs] - observed run stats.
+ * @param {{ windowDays?: number, revertRate?: number, tokenSafetyDropped?: number,
+ *          candidatesBeforeSafety?: number }} [obs] - observed run stats.
  * @returns {object} verdict report.
  */
 function applyKillCriteria(evals, killCfg, obs = {}) {
   const reasons = [];
   const windowDays = obs.windowDays || 1;
+  const tokenSafetyDropped = obs.tokenSafetyDropped || 0;
 
   const profitableFat = evals.filter((e) => e.profitableFat);
   const profitableLean = evals.filter((e) => e.profitableLean);
@@ -246,6 +358,16 @@ function applyKillCriteria(evals, killCfg, obs = {}) {
     );
   }
 
+  // Token-safety GATE result (PLAY #4). Dropped candidates never reach evaluation; this is
+  // informational in the verdict (the drop already happened). A high drop rate on a fresh-pool
+  // run is EXPECTED — long-tail pools are full of honeypots — and proves the gate is working.
+  if (tokenSafetyDropped > 0) {
+    reasons.push(
+      `INFO: token-safety GATE dropped ${tokenSafetyDropped} candidate(s) (honeypot / sell-block ` +
+        '/ transfer-tax / max-tx) BEFORE evaluation. Never fired.'
+    );
+  }
+
   // Representativeness gate
   if (opportunitiesPerDay < (killCfg.minOpportunitiesPerDay || 0)) {
     reasons.push(
@@ -262,6 +384,8 @@ function applyKillCriteria(evals, killCfg, obs = {}) {
     reasons,
     stats: {
       candidates: evals.length,
+      candidatesBeforeSafety: obs.candidatesBeforeSafety ?? evals.length,
+      tokenSafetyDropped,
       profitableFat: profitableFat.length,
       profitableLean: profitableLean.length,
       medianNetUsdFat: medianNetFat,
@@ -274,22 +398,45 @@ function applyKillCriteria(evals, killCfg, obs = {}) {
 }
 
 /**
- * Full Stage 3+4 run over a snapshot + candidates. Pure (no I/O) so it is unit-testable.
+ * Full Stage 3+4 run over a snapshot + candidates.
+ *
+ * PIPELINE ORDER (PLAY #4 gate enforced):
+ *   candidates --[token-safety GATE]--> safe candidates --[size+net-of-gas]--> evals --[KILL/GO]
+ * Candidates failing token-safety are DROPPED here and never evaluated or fired; the drop
+ * count flows into the verdict stats. The gate is async (it may eth_call an RPC); in offline
+ * mode it is a no-op pass-through unless `obs.injectedSafety` drives deterministic failures.
+ *
  * @param {object} snapshot
  * @param {object[]} candidates - from pathfinder.findCandidateCycles().
- * @param {object} config - full research config (uses .gas and .kill).
- * @param {{ windowDays?: number, winRate?: number, revertRate?: number }} [obs]
- * @returns {{ evals: object[], report: object, executorComparisonSample: object }}
+ * @param {object} config - full research config (uses .gas, .kill, .sizing, .tokenSafety).
+ * @param {{ windowDays?: number, winRate?: number, revertRate?: number,
+ *          provider?: object, router?: string, injectedSafety?: object }} [obs]
+ * @returns {Promise<{ evals:object[], report:object, executorComparisonSample:object, safety:object }>}
  */
-function runBacktest(snapshot, candidates, config, obs = {}) {
+async function runBacktest(snapshot, candidates, config, obs = {}) {
   const gasCfg = config.gas || {};
   const killCfg = config.kill || {};
-  const evals = candidates.map((c) => evaluateCandidate(c, gasCfg));
-  const report = applyKillCriteria(evals, killCfg, obs);
+  const sizingCfg = config.sizing || {};
+
+  // Stage-3 PRE-FIRE token-safety GATE (PLAY #4): drop unsafe candidates before any sizing.
+  const safety = await gateTokenSafety(candidates, snapshot.baseToken, {
+    provider: obs.provider,
+    router: obs.router || (config.tokenSafety && config.tokenSafety.router),
+    tokenSafetyCfg: config.tokenSafety || {},
+    injectedSafety: obs.injectedSafety
+  });
+  const safeCandidates = safety.safe;
+
+  const evals = safeCandidates.map((c) => evaluateCandidate(c, gasCfg, sizingCfg));
+  const report = applyKillCriteria(evals, killCfg, {
+    ...obs,
+    tokenSafetyDropped: safety.dropped.length,
+    candidatesBeforeSafety: candidates.length
+  });
   // Head-to-head fat-vs-lean gas at a representative hop count, for the strip decision.
   const sampleHops = evals.length ? evals[0].hopCount : 3;
   const executorComparisonSample = compareExecutors(sampleHops, gasCfg);
-  return { evals, report, executorComparisonSample };
+  return { evals, report, executorComparisonSample, safety };
 }
 
 /**
@@ -301,6 +448,8 @@ function printReport(result) {
   const { evals, report, executorComparisonSample } = result;
   const line = '='.repeat(72);
   console.log(`\n${line}\nPAPER-TRADE REPORT (net-of-gas) — Stage 4 KILL/GO\n${line}`);
+  console.log(`candidates (pre-gate): ${report.stats.candidatesBeforeSafety}`);
+  console.log(`token-safety dropped : ${report.stats.tokenSafetyDropped}`);
   console.log(`candidates evaluated : ${report.stats.candidates}`);
   console.log(`profitable (fat V2)  : ${report.stats.profitableFat}`);
   console.log(`profitable (lean)    : ${report.stats.profitableLean}`);
@@ -326,6 +475,8 @@ module.exports = {
   simulateCycle,
   optimalInput,
   weiToUsd,
+  tokenSafetyTargets,
+  gateTokenSafety,
   evaluateCandidate,
   applyKillCriteria,
   runBacktest,

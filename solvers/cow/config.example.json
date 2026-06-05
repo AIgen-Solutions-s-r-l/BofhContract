@@ -1,0 +1,82 @@
+{
+  "_comment": "Example config for the BofhContractV2-backed CoW Protocol solver SCAFFOLD. Copy to config.json and fill in real values. SECRETS (driver auth, rewards key) NEVER live here — they come from env vars named below.",
+
+  "env": "staging",
+  "_env_note": "one of: shadow | staging (barn) | prod. Drives which CoW driver/orderbook the loop talks to. The real driver endpoint is {base}/${env}/${network} — see README onboarding runbook.",
+
+  "chain": {
+    "key": "arbitrum",
+    "_key_note": "CoW requires Arbitrum FIRST for staging+prod. addresses use arbitrum-one in the CoW network table.",
+    "chainId": 42161,
+    "network": "arbitrum-one",
+    "nativeSymbol": "ETH",
+    "rpcEnv": "ARBITRUM_RPC_URL",
+    "_rpcEnv_note": "TODO(real): export ARBITRUM_RPC_URL=https://... — never hardcode the URL here."
+  },
+
+  "cow": {
+    "_cow_note": "These are the CoW driver/orderbook endpoints. The DRIVER (CoW infra, managed for bonding-pool members) POSTs /solve to OUR engine; it is not an endpoint we call. We expose an HTTP server; CoW pulls from us. The orderbook/api below is for read-only inspection during shadow.",
+    "solverEngineBindEnv": "COW_SOLVER_BIND",
+    "_solverEngineBind_note": "host:port this scaffold's HTTP server binds to so the CoW driver can POST /${env}/${network}/solve. TODO(real): wire an actual HTTP server (express/fastify) — not installed; see README.",
+    "orderbookApiEnv": "COW_ORDERBOOK_API",
+    "_orderbookApi_note": "e.g. https://api.cow.fi/arbitrum_one — read-only, for shadow-mode auction inspection.",
+    "driverAuthEnv": "COW_DRIVER_AUTH_TOKEN",
+    "_driverAuth_note": "TODO(real): bearer/shared-secret the driver uses to authenticate /solve requests, issued during onboarding.",
+    "rewardsAddressEnv": "COW_REWARDS_ADDRESS",
+    "_rewardsAddress_note": "address controlled by the solver team that receives COW rewards. MUST be controlled on BOTH the solving chain AND mainnet (per onboarding)."
+  },
+
+  "interactionContract": {
+    "_note": "BofhContractV2 deployed on the solving chain. It is the non-custodial INTERACTION contract the settlement calls via a custom interaction. The CoW Settlement contract transfers sell tokens to it, it routes the swap across the V2-fork registry, and returns buy tokens.",
+    "address": "0x0000000000000000000000000000000000000000",
+    "_address_note": "TODO(real): deploy BofhContractV2 to Arbitrum and put its address here. The zero address is a placeholder and will make the scaffold emit a config error.",
+    "abiEntrypoint": "executeSwapMultiDex(address[],uint256[],uint16[],uint256,uint256,uint256)"
+  },
+
+  "settlementContract": {
+    "_note": "Canonical CoW Settlement (GPv2Settlement) on the solving chain. The interaction is executed BY this contract, so token balances live here at interaction time.",
+    "address": "0x9008D19f58AAbD9eD0D60971565AA8510560ab41",
+    "_address_note": "GPv2Settlement is the same address across most CoW chains incl. Arbitrum. VERIFY on the explorer before any real run."
+  },
+
+  "dexRegistry": {
+    "_note": "Mirror of the on-chain BofhContractV2 owner-managed DexRegistry (dexId -> {factory, feeBps}). Used off-chain by the pathfinder to score routes. MUST match the on-chain registry or settlements will revert.",
+    "dexIds": {
+      "0": { "name": "immutable-factory", "factory": "0x0000000000000000000000000000000000000000", "feeBps": 30 },
+      "1": { "name": "example-v2-fork", "factory": "0x0000000000000000000000000000000000000000", "feeBps": 25 }
+    },
+    "_dexIds_note": "TODO(real): populate with the actual Arbitrum V2-fork factories you have registered on-chain."
+  },
+
+  "tokenAllowlist": {
+    "_note": "GATE: only orders whose sell+buy tokens are BOTH on this list are solved. This is the off-chain analogue of the token-safety simulator gate from the research report — it bounds honeypot/fee-on-transfer exposure. Empty list = solve nothing (fail closed).",
+    "tokens": [
+      "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1",
+      "0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8",
+      "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+      "0xfd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9"
+    ],
+    "_tokens_note": "WETH, USDC.e, USDC, USDT on Arbitrum as a conservative seed. Add long-tail tokens only after each passes the token-safety simulator (TODO). Symbols are NOT checked — addresses are authoritative."
+  },
+
+  "pathfinder": {
+    "_note": "Forwarded to research/pathfinder.js findCandidateCycles. maxHops MUST be <= 5 so any route is settlable: the contract's MAX_PATH_LENGTH is 6 TOKENS = 5 HOPS, and a hop count = path.length - 1.",
+    "maxHops": 4,
+    "minHops": 2,
+    "topN": 25
+  },
+
+  "gas": {
+    "_note": "Forwarded to research/gasModel.js + backtester.js for net-of-gas scoring. Placeholder figures — TODO(measure) with REPORT_GAS=true and live base-fee.",
+    "baseFeeGwei": 0.05,
+    "priorityFeeGwei": 0.01,
+    "nativeUsdPrice": 3000
+  },
+
+  "scoring": {
+    "_note": "A solution is only returned if its net-of-gas surplus is strictly positive. minNetSurplusUsd is an extra safety margin so we never submit a marginal (likely-to-revert-or-lose) solution. This OFF-CHAIN net-of-gas gate is the REAL economic guard — the on-chain minAmountOut only enforces break-even round-trip by default (see below).",
+    "minNetSurplusUsd": 0.50,
+    "minOnchainProfitBps": 0,
+    "_minOnchainProfitBps_note": "On-chain minAmountOut floor in bps over amountIn. 0 = break-even only (the contract guards a stale-reserve revert, not a losing trade — the off-chain net-of-gas score above is the economic guard, and CoW won't submit a losing solution). Set >0 for belt-and-suspenders defence against bad off-chain scoring."
+  }
+}
