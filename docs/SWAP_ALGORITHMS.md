@@ -1,9 +1,38 @@
-# Advanced Multi-Path Token Swap Algorithms: 
-# A Novel Approach Using Golden Ratio Optimization and Dynamic Programming
+# Multi-Hop / Multi-DEX Swap Execution
 
-## Abstract
+> **Correction notice.** Earlier versions of this document described a "golden ratio (φ)
+> optimization" for 4-way and 5-way swaps. **That optimization was never wired into the
+> production swap path** — the relevant functions (`MathLib.calculateOptimalAmount`,
+> `PoolLib.calculateOptimalSwapAmount`) had zero production callers and have been removed.
+> The sections below that discuss golden-ratio path splitting are retained only as historical
+> design notes; they do **not** describe the deployed contract. Any path-finding /
+> amount-sizing optimization belongs **off-chain**, not in the executor.
 
-This paper presents a novel approach to optimizing multi-path token swaps in decentralized exchanges (DEXs) using golden ratio-based path splitting and dynamic programming techniques. We introduce new algorithms for 4-way and 5-way swaps that achieve significant improvements in execution efficiency and price impact minimization. Our experimental results show a 43% reduction in gas consumption and a 52% improvement in price impact compared to traditional approaches.
+## What the contract actually does
+
+`BofhContractV2` is a **sequential constant-product (x·y=k) multi-hop swap executor**. The full
+input amount flows through each hop in order; each hop is priced with the standard Uniswap-V2
+constant-product-with-fee formula using a **caller-supplied (or DEX-registry-resolved) per-hop
+fee**. Every path must start and end with `baseToken`, and the whole multi-hop trade is atomic
+(all hops succeed or the transaction reverts). Hops may optionally route through different
+Uniswap-V2 forks via an owner-managed DEX registry (`executeSwapMultiDex`). There is **no
+on-chain amount-splitting or golden-ratio optimization**.
+
+For each hop with reserves `(reserveIn, reserveOut)` and fee `feeBps`:
+
+```
+amountInWithFee = amountIn * (10000 - feeBps)
+amountOut       = (amountInWithFee * reserveOut)
+                  / (reserveIn * 10000 + amountInWithFee)
+```
+
+---
+
+## Abstract (historical design note — not the shipped behavior)
+
+This section presents an earlier proposal to optimize multi-path token swaps using golden
+ratio-based path splitting and dynamic programming. It was never integrated into the deployed
+executor and is kept for historical context only.
 
 ## 1. Introduction
 

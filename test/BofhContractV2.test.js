@@ -169,10 +169,44 @@ describe("BofhContractV2", function () {
             await expect(bofh.connect(owner).emergencyUnpause()).to.not.be.reverted;
         });
 
-        it("Should allow owner to transfer ownership", async function () {
+        it("Should transfer ownership via two-step flow (Ownable2Step)", async function () {
             const { bofh, owner, user1 } = await loadFixture(deployContractsFixture);
+
+            // Step 1: owner nominates - admin is unchanged, pendingOwner is set
             await bofh.connect(owner).transferOwnership(user1.address);
+            expect(await bofh.getAdmin()).to.equal(owner.address);
+            expect(await bofh.pendingOwner()).to.equal(user1.address);
+
+            // Step 2: nominee accepts - admin updates, pendingOwner cleared
+            await bofh.connect(user1).acceptOwnership();
             expect(await bofh.getAdmin()).to.equal(user1.address);
+            expect(await bofh.pendingOwner()).to.equal(ethers.ZeroAddress);
+        });
+
+        it("Should prevent a non-pending address from accepting ownership", async function () {
+            const { bofh, owner, user1, user2 } = await loadFixture(deployContractsFixture);
+
+            await bofh.connect(owner).transferOwnership(user1.address);
+
+            // user2 is not the pending owner -> cannot accept
+            await expect(
+                bofh.connect(user2).acceptOwnership()
+            ).to.be.revertedWithCustomError(bofh, "Unauthorized");
+
+            // current owner is also not the pending owner -> cannot accept
+            await expect(
+                bofh.connect(owner).acceptOwnership()
+            ).to.be.revertedWithCustomError(bofh, "Unauthorized");
+
+            // ownership unchanged
+            expect(await bofh.getAdmin()).to.equal(owner.address);
+        });
+
+        it("Should prevent non-owner from initiating ownership transfer", async function () {
+            const { bofh, user1, user2 } = await loadFixture(deployContractsFixture);
+            await expect(
+                bofh.connect(user1).transferOwnership(user2.address)
+            ).to.be.revertedWithCustomError(bofh, "Unauthorized");
         });
 
         it("Should prevent ownership transfer to zero address", async function () {

@@ -45,9 +45,9 @@ Rationale:
 
 #### 2. BofhContractV2
 - Main implementation contract
-- Swap execution logic
-- Path optimization
-- Price impact management
+- Sequential multi-hop / multi-DEX swap execution (constant product, x·y=k)
+- Per-hop fee correctness and owner-managed DEX registry routing
+- Price impact validation (per-hop cap via PoolLib.validateSwap)
 
 Architecture Pattern:
 ```solidity
@@ -66,9 +66,9 @@ Benefits:
 #### 3. Library System 📚
 
 ##### MathLib
-- Mathematical operations
-- Optimization algorithms
-- Numerical methods
+- Mathematical operations (sqrt, cbrt)
+- Fixed-point helpers (log2, exp2) used by pool volatility analysis
+- Numerical methods (Newton's method)
 
 Design Philosophy:
 ```solidity
@@ -208,8 +208,8 @@ struct PackedState {
 - Minimal storage operations
 
 ### 2. Execution Speed
-- Path optimization
-- Parallel computation where possible
+- Single-pass hop iteration (no on-chain path search or amount-splitting)
+- Per-hop pricing inlined via SwapMathLib
 - Efficient algorithms
 
 ## Future Extensibility 🔮

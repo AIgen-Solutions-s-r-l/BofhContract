@@ -34,6 +34,7 @@ library SecurityLib {
     /// @custom:field owner Contract owner address with full permissions (20 bytes)
     /// @custom:field paused Emergency pause state (when true, most functions revert) (1 byte, packed)
     /// @custom:field locked Reentrancy guard lock (true when function is executing) (1 byte, packed)
+    /// @custom:field pendingOwner Address nominated by transferOwnership; must call acceptOwnership
     /// @custom:field lastActionTimestamp Last action timestamp for cooldown/rate limiting (32 bytes, slot 1)
     /// @custom:field globalActionCounter Total actions in current interval (32 bytes, slot 2)
     /// @custom:field operators Mapping of authorized operator addresses (separate slots)
@@ -43,17 +44,24 @@ library SecurityLib {
         address owner;              // Slot 0: bytes 0-19 (20 bytes)
         bool paused;                // Slot 0: byte 20 (1 byte, packed with owner)
         bool locked;                // Slot 0: byte 21 (1 byte, packed with owner and paused)
-        uint256 lastActionTimestamp;    // Slot 1: full slot (32 bytes)
-        uint256 globalActionCounter;    // Slot 2: full slot (32 bytes)
-        mapping(address => bool) operators;            // Slot 3+: mappings always separate
+        address pendingOwner;       // Slot 1: bytes 0-19 (two-step ownership handoff target)
+        uint256 lastActionTimestamp;    // Slot 2: full slot (32 bytes)
+        uint256 globalActionCounter;    // Slot 3: full slot (32 bytes)
+        mapping(address => bool) operators;            // Slot 4+: mappings always separate
         mapping(bytes4 => uint256) functionCooldowns;  // Slot N+: mappings always separate
         mapping(address => uint256) userActionCounts;  // Slot M+: mappings always separate
     }
 
-    /// @notice Emitted when contract ownership is transferred
+    /// @notice Emitted when ownership of the contract is completed (acceptOwnership)
     /// @param previousOwner Address of the previous owner
     /// @param newOwner Address of the new owner
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
+
+    /// @notice Emitted when an ownership transfer is initiated (transferOwnership)
+    /// @dev Step 1 of the two-step (Ownable2Step) handoff; the nominee must call acceptOwnership
+    /// @param previousOwner Current owner that initiated the transfer
+    /// @param newOwner Nominated owner that must accept to take control
+    event OwnershipTransferStarted(address indexed previousOwner, address indexed newOwner);
 
     /// @notice Emitted when operator status is changed
     /// @param operator Address of the operator
@@ -136,22 +144,39 @@ library SecurityLib {
         self.locked = false;
     }
 
-    /// @notice Transfer contract ownership to a new address
-    /// @dev Only callable by current owner, validates new owner is not zero address
+    /// @notice Start a two-step ownership transfer by nominating a new owner (Ownable2Step)
+    /// @dev Step 1: only the current owner may nominate. Ownership does NOT change here; the nominee
+    /// @dev must call acceptOwnership to take control. This prevents accidentally handing the contract
+    /// @dev to a wrong/uncontrolled address (the classic single-step transferOwnership footgun).
     /// @param self Security state containing current owner
-    /// @param newOwner Address of the new owner
+    /// @param newOwner Address nominated as the next owner (must not be address(0))
     /// @custom:security Validates caller is current owner and newOwner != address(0)
-    /// @custom:security Emits OwnershipTransferred event for off-chain tracking
+    /// @custom:security Emits OwnershipTransferStarted; OwnershipTransferred fires only on acceptOwnership
     function transferOwnership(
         SecurityState storage self,
         address newOwner
     ) internal {
-        address oldOwner = self.owner;
-        if (msg.sender != oldOwner) revert Unauthorized();
+        if (msg.sender != self.owner) revert Unauthorized();
         if (newOwner == address(0)) revert InvalidAddress();
 
-        self.owner = newOwner;
-        emit OwnershipTransferred(oldOwner, newOwner);
+        self.pendingOwner = newOwner;
+        emit OwnershipTransferStarted(self.owner, newOwner);
+    }
+
+    /// @notice Complete a two-step ownership transfer (Ownable2Step)
+    /// @dev Step 2: only the address nominated by transferOwnership may accept. Promotes the
+    /// @dev pendingOwner to owner and clears the nomination. Any address that is not the current
+    /// @dev pendingOwner (including a non-pending account or address(0) before any nomination) reverts.
+    /// @param self Security state containing current owner and pendingOwner
+    /// @custom:security Reverts Unauthorized if msg.sender != pendingOwner
+    /// @custom:security Emits OwnershipTransferred for off-chain tracking
+    function acceptOwnership(SecurityState storage self) internal {
+        if (msg.sender != self.pendingOwner) revert Unauthorized();
+
+        address oldOwner = self.owner;
+        self.owner = self.pendingOwner;
+        self.pendingOwner = address(0);
+        emit OwnershipTransferred(oldOwner, self.owner);
     }
 
     /// @notice Grant or revoke operator status for an address

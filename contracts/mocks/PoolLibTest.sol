@@ -32,13 +32,6 @@ contract PoolLibTest {
         return PoolLib.analyzePool(pool, tokenIn, amountIn, timestamp);
     }
 
-    function testCalculateOptimalSwapAmount(
-        PoolLib.PoolState memory pool,
-        PoolLib.SwapParams memory params
-    ) external pure returns (uint256 optimalAmount, uint256 expectedOutput) {
-        return PoolLib.calculateOptimalSwapAmount(pool, params);
-    }
-
     function testValidateSwap(
         PoolLib.PoolState memory pool,
         PoolLib.SwapParams memory params

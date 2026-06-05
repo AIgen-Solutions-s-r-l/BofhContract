@@ -16,12 +16,6 @@ library MathLib {
     /// @notice Cube root calculation precision (100)
     uint256 private constant CBRT_PRECISION = 1e2;
 
-    /// @notice Golden ratio constant φ ≈ 0.618034 (scaled by PRECISION)
-    uint256 private constant GOLDEN_RATIO = 618034;
-
-    /// @notice Golden ratio squared φ² ≈ 0.381966 (scaled by PRECISION)
-    uint256 private constant GOLDEN_RATIO_SQUARED = 381966;
-
     /// @notice Calculate square root using Newton's method
     /// @dev Uses Newton-Raphson iteration: y_{n+1} = (y_n + x/y_n) / 2
     /// @dev Converges quadratically with better initial guess via bit length
@@ -64,26 +58,6 @@ library MathLib {
             y = (2 * y + x / ySquared) / 3;
         }
         return z;
-    }
-
-    /// @notice Calculate geometric mean of two numbers with overflow protection
-    /// @dev Geometric mean = √(a × b), uses log approximation for large numbers
-    /// @dev For a,b > uint128.max, uses log identity: √(a×b) = 2^((log₂a + log₂b)/2)
-    /// @param a First number
-    /// @param b Second number
-    /// @return Geometric mean of a and b
-    /// @custom:security Prevents overflow for values > type(uint128).max
-    /// @custom:math Geometric mean ≤ arithmetic mean (AM-GM inequality)
-    function geometricMean(uint256 a, uint256 b) internal pure returns (uint256) {
-        if (a == 0 || b == 0) return 0;
-        
-        // Use log approximation for very large numbers
-        if (a > type(uint128).max || b > type(uint128).max) {
-            uint256 logSum = (log2(a) + log2(b)) / 2;
-            return exp2(logSum);
-        }
-        
-        return sqrt(a * b);
     }
 
     /// @notice Calculate base-2 logarithm using binary search
@@ -138,34 +112,5 @@ library MathLib {
         }
         
         return sum;
-    }
-
-    /// @notice Calculate optimal amount distribution for multi-path swaps using golden ratio
-    /// @dev Implements φ-based optimization to minimize price impact across paths
-    /// @dev 3-way: Equal distribution (1/3 each)
-    /// @dev 4-way: Golden ratio φ ≈ 0.618034 distribution
-    /// @dev 5-way: Golden ratio squared φ² ≈ 0.381966 distribution
-    /// @param amount Total amount to distribute
-    /// @param pathLength Number of swap paths (3, 4, or 5)
-    /// @param position Current position in the path distribution (0-indexed)
-    /// @return Optimal amount for the given position
-    /// @custom:math Golden ratio minimizes Σ(1/xᵢ) subject to Πxᵢ = constant (Lagrange multipliers)
-    /// @custom:security Reverts if pathLength not in [3,5]
-    function calculateOptimalAmount(
-        uint256 amount,
-        uint256 pathLength,
-        uint256 position
-    ) internal pure returns (uint256) {
-        require(pathLength >= 3 && pathLength <= 5, "Invalid path length");
-
-        // Golden ratio-based optimization
-        if (pathLength == 4) {
-            return (amount * (PRECISION - (GOLDEN_RATIO * position) / pathLength)) / PRECISION;
-        } else if (pathLength == 5) {
-            return (amount * (PRECISION - (GOLDEN_RATIO_SQUARED * position) / pathLength)) / PRECISION;
-        }
-
-        // Default to equal distribution for 3-way
-        return (amount * (PRECISION - position * PRECISION / pathLength)) / PRECISION;
     }
 }

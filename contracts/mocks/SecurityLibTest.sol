@@ -14,6 +14,7 @@ contract SecurityLibTest {
 
     // Events (re-declared for testing)
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
+    event OwnershipTransferStarted(address indexed previousOwner, address indexed newOwner);
     event OperatorStatusChanged(address indexed operator, bool status);
     event SecurityStateChanged(bool paused, bool locked);
     event AnomalyDetected(address indexed user, bytes4 indexed selector, string reason);
@@ -50,6 +51,10 @@ contract SecurityLibTest {
 
     function testTransferOwnership(address newOwner) external {
         securityState.transferOwnership(newOwner);
+    }
+
+    function testAcceptOwnership() external {
+        securityState.acceptOwnership();
     }
 
     function testSetOperator(address operator, bool status) external {
@@ -98,6 +103,10 @@ contract SecurityLibTest {
     // Getters for testing state
     function getOwner() external view returns (address) {
         return securityState.owner;
+    }
+
+    function getPendingOwner() external view returns (address) {
+        return securityState.pendingOwner;
     }
 
     function isPaused() external view returns (bool) {

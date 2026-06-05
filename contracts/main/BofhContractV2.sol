@@ -6,12 +6,17 @@ import "../interfaces/ISwapInterfaces.sol";
 import "../interfaces/IBofhContract.sol";
 import "../libs/SwapMathLib.sol";
 
-/// @title BofhContractV2 - Advanced Multi-Path Token Swap Router
+/// @title BofhContractV2 - Multi-Hop / Multi-DEX Atomic Swap Executor
 /// @author Bofh Team
-/// @notice Executes optimized token swaps across multiple paths using golden ratio distribution
-/// @dev Implements 3/4/5-way swap path optimization with comprehensive security features
+/// @notice Executes a sequential constant-product (x*y=k) multi-hop swap across one or more
+/// @notice Uniswap-V2-style DEXes in a single atomic transaction. Every path must start and end
+/// @notice with baseToken; each hop is priced with the correct per-hop fee.
+/// @dev Walks the path hop-by-hop (pre-fund -> IGenericPair.swap -> balanceOf delta). Hops may route
+/// @dev through different V2 forks via an owner-managed DEX registry (executeSwapMultiDex). There is
+/// @dev NO amount-splitting or golden-ratio optimization; the full amount flows through each hop.
 /// @custom:security Inherits security from BofhContractBase (reentrancy, access control, MEV protection)
-/// @custom:optimization Uses golden ratio (φ ≈ 0.618034) for 4-way and 5-way path distribution
+/// @custom:fee Per-hop fee is caller-supplied (or resolved from the DEX registry) so pricing is exact
+/// @custom:fee on forks with non-0.3% fees (Pancake 0.25%, Uniswap 0.3%, higher-fee forks)
 contract BofhContractV2 is BofhContractBase, IBofhContract {
     using MathLib for uint256;
     using PoolLib for PoolLib.PoolState;
@@ -195,13 +200,11 @@ contract BofhContractV2 is BofhContractBase, IBofhContract {
         // Validate final output
         if (state.currentAmount < minAmountOut) revert InsufficientOutput();
 
-        // Calculate total price impact and validate
-        // Gas optimization: Use unchecked for multiplication (overflow not possible with PRECISION = 1e6)
-        uint256 priceImpact;
-        unchecked {
-            priceImpact = (state.cumulativeImpact * PRECISION) / amountIn;
-        }
-        if (priceImpact > maxPriceImpact) revert ExcessiveSlippage();
+        // The real price-impact cap is enforced PER HOP by PoolLib.validateSwap (each hop reverts
+        // if its impact exceeds maxPriceImpact). The previously-here cumulative gate divided the
+        // summed impact by amountIn, which is dimensionally broken (truncates to 0 for realistic
+        // 18-decimal trades) and never fired, so it was removed. cumulativeImpact is still summed
+        // and surfaced in the SwapExecuted event for off-chain analytics.
 
         // Transfer profit to recipient (Phase 3: optimized)
         SwapMathLib.safeTransfer(baseToken, recipient, state.currentAmount);
@@ -211,7 +214,7 @@ contract BofhContractV2 is BofhContractBase, IBofhContract {
             pathLength,
             amountIn,
             state.currentAmount,
-            priceImpact
+            state.cumulativeImpact
         );
 
         return state.currentAmount;
@@ -430,12 +433,9 @@ contract BofhContractV2 is BofhContractBase, IBofhContract {
         // Validate final output
         if (state.currentAmount < minAmountOut) revert InsufficientOutput();
 
-        // Calculate total price impact and validate (uses nominal amountIn, matching legacy path)
-        uint256 priceImpact;
-        unchecked {
-            priceImpact = (state.cumulativeImpact * PRECISION) / amountIn;
-        }
-        if (priceImpact > maxPriceImpact) revert ExcessiveSlippage();
+        // Per-hop PoolLib.validateSwap enforces the real maxPriceImpact cap (see the legacy path).
+        // The old cumulative gate was dimensionally broken (always 0) and has been removed.
+        // cumulativeImpact remains summed and is surfaced in the SwapExecuted event.
 
         // Transfer profit to caller
         SwapMathLib.safeTransfer(baseToken, msg.sender, state.currentAmount);
@@ -445,7 +445,7 @@ contract BofhContractV2 is BofhContractBase, IBofhContract {
             pathLength,
             amountIn,
             state.currentAmount,
-            priceImpact
+            state.cumulativeImpact
         );
 
         return state.currentAmount;

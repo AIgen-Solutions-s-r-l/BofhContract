@@ -305,13 +305,28 @@ abstract contract BofhContractBase is IBofhContractBase, DexRegistry {
         securityState.emergencyUnpause();
     }
 
-    /// @notice Transfer contract ownership to a new address
-    /// @dev Only callable by current owner, delegates to SecurityLib.transferOwnership
-    /// @param newOwner Address of new owner (must not be address(0))
+    /// @notice Start a two-step ownership transfer by nominating a new owner (Ownable2Step)
+    /// @dev Step 1 of 2: only the current owner may nominate. Ownership does NOT change until the
+    /// @dev nominee calls acceptOwnership(), preventing an irreversible transfer to a wrong address.
+    /// @param newOwner Address nominated as the next owner (must not be address(0))
     /// @custom:security Validates newOwner != address(0) in SecurityLib
-    /// @custom:security Emits OwnershipTransferred event via SecurityLib
+    /// @custom:security Emits OwnershipTransferStarted via SecurityLib
     function transferOwnership(address newOwner) external onlyOwner {
         securityState.transferOwnership(newOwner);
+    }
+
+    /// @notice Accept a pending ownership transfer (Ownable2Step)
+    /// @dev Step 2 of 2: only the address nominated via transferOwnership() may accept. Any other
+    /// @dev caller (including one with no pending nomination) reverts Unauthorized.
+    /// @custom:security Promotes pendingOwner to owner and emits OwnershipTransferred via SecurityLib
+    function acceptOwnership() external {
+        securityState.acceptOwnership();
+    }
+
+    /// @notice Get the address nominated to become the next owner (zero if none pending)
+    /// @return The pending owner address awaiting acceptOwnership()
+    function pendingOwner() external view returns (address) {
+        return securityState.pendingOwner;
     }
 
     /// @notice Grant or revoke operator status for an address

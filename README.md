@@ -2,9 +2,9 @@
 
 # 🏆 BofhContract V2
 
-### Advanced Multi-Path Token Swap Optimizer for Binance Smart Chain
+### Multi-Hop / Multi-DEX Atomic Swap Executor for EVM Chains
 
-**Leveraging Golden Ratio Mathematics for Provably Optimal DeFi Swaps**
+**A non-custodial sequential constant-product (x·y=k) executor with per-hop fee correctness and an owner-managed multi-DEX registry**
 
 [![Tests](https://img.shields.io/badge/tests-179%20passing-brightgreen?style=for-the-badge&logo=github)](https://github.com/Bofh-Reloaded/BofhContract)
 [![Coverage](https://img.shields.io/badge/coverage-94%25%20production-brightgreen?style=for-the-badge&logo=codecov)](https://github.com/Bofh-Reloaded/BofhContract)
@@ -80,14 +80,14 @@
 <tr>
 <td width="50%">
 
-### 🧮 Mathematical Sophistication
+### 🧮 Swap Engine
 
-- **Golden Ratio Optimization** (φ ≈ 0.618034)
-  - Provably optimal path splitting for 4/5-way swaps
-  - Lagrange multiplier-based optimization
-  - Third-order Taylor expansion for price impact
+- **Sequential CPMM Execution** (constant product, x·y=k)
+  - Multi-hop paths that start and end with `baseToken`
+  - The full amount flows through each hop (no amount-splitting)
+  - Per-hop fee correctness (Pancake 0.25%, Uniswap 0.3%, higher-fee forks)
 
-- **Advanced CPMM Analysis**
+- **CPMM Analysis**
   - Dynamic pool state analysis
   - Geometric mean liquidity calculation
   - Newton's method for precision (sqrt, cbrt)
@@ -286,10 +286,10 @@ npm run verify:testnet
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                     BofhContractV2.sol                      │
-│  Main Implementation: Swap Execution & Optimization         │
-│  • executeSwap() - Single swap execution                    │
-│  • executeMultiSwap() - Multi-path optimization             │
-│  • executeBatchSwaps() - Atomic batch operations            │
+│  Main Implementation: Multi-Hop / Multi-DEX Swap Execution  │
+│  • executeSwap() - Single multi-hop swap (one factory)      │
+│  • executeSwapMultiDex() - Per-hop multi-DEX routing        │
+│  • executeMultiSwap() / executeBatchSwaps() - Batch swaps   │
 │  Lines: 404 | Coverage: 90.83%                              │
 └──────────────────────┬──────────────────────────────────────┘
                        │ inherits
@@ -307,8 +307,8 @@ npm run verify:testnet
 ├──────────────┤ ├─────────────┤ ├──────────────┤
 │ • Reentrancy │ │ • sqrt()    │ │ • analyzePool│
 │ • Access     │ │ • cbrt()    │ │ • priceImpact│
-│ • MEV Guard  │ │ • geoMean() │ │ • validate() │
-│ • Rate Limit │ │ • goldenφ() │ │ • CPMM calc  │
+│ • MEV Guard  │ │ • log2()    │ │ • validate() │
+│ • Rate Limit │ │ • exp2()    │ │ • CPMM calc  │
 ├──────────────┤ ├─────────────┤ ├──────────────┤
 │ Lines: 300   │ │ Lines: 171  │ │ Lines: 274   │
 │ Cov: 93.48%  │ │ Cov: 100%   │ │ Cov: 95.24%  │
@@ -328,7 +328,7 @@ npm run verify:testnet
 <td><code>BofhContractV2.sol</code></td>
 <td align="right">404</td>
 <td align="center">✅ 90.83%</td>
-<td>Swap execution, golden ratio optimization, batch operations</td>
+<td>Multi-hop / multi-DEX swap execution, batch operations</td>
 </tr>
 <tr>
 <td><code>BofhContractBase.sol</code></td>
@@ -340,7 +340,7 @@ npm run verify:testnet
 <td><code>MathLib.sol</code></td>
 <td align="right">171</td>
 <td align="center">✅ 100%</td>
-<td>Newton's method (sqrt, cbrt), golden ratio, geometric mean</td>
+<td>Newton's method (sqrt, cbrt), log2/exp2 fixed-point helpers</td>
 </tr>
 <tr>
 <td><code>PoolLib.sol</code></td>
@@ -556,38 +556,30 @@ MEV Protection Tests: 8    ✅
 
 ## 🧮 Mathematical Foundations
 
-### Golden Ratio Optimization (φ ≈ 0.618034)
+### Sequential CPMM Execution (constant product, x·y=k)
 
 <table>
 <tr>
 <td width="60%">
 
-The system uses the **golden ratio** for provably optimal path splitting in multi-way swaps:
+The contract executes a **sequential multi-hop swap**: the full input amount flows
+through each hop in order, and every hop is priced with the standard
+Uniswap-V2 constant-product-with-fee formula. There is **no amount-splitting or
+golden-ratio "optimization"** — that is the off-chain path-finder's job, not the
+executor's.
 
 ```
-φ = (1 + √5) / 2 ≈ 1.618034
-φ⁻¹ ≈ 0.618034
-
-For 4-way swaps:
-  Path 1: φ⁻¹ ≈ 61.8% of total amount
-  Path 2: φ⁻² ≈ 38.2% of total amount
-  Path 3: φ⁻³ ≈ 23.6% of total amount
-  Path 4: Remainder
+For each hop (reserveIn, reserveOut, feeBps):
+  amountInWithFee = amountIn * (10000 - feeBps)
+  amountOut = (amountInWithFee * reserveOut)
+              / (reserveIn * 10000 + amountInWithFee)
 ```
 
-**Proof of Optimality:**
-
-Using Lagrange multipliers to minimize total price impact:
-
-```
-L = Σ(impact_i) + λ(Σ(amount_i) - total)
-∂L/∂amount_i = 0  ⟹  Golden ratio distribution
-```
-
-**Benefits:**
-- ✅ Provably minimizes cumulative price impact
-- ✅ Self-similar across all path counts
-- ✅ Mathematically elegant and computationally efficient
+**Properties:**
+- ✅ Atomic: all hops succeed or the whole tx reverts
+- ✅ Per-hop fee correctness (0.25% / 0.3% / higher-fee forks)
+- ✅ Paths must start and end with `baseToken`
+- ✅ Optional per-hop routing across V2 forks via an owner-managed DEX registry
 
 </td>
 <td width="40%">
@@ -612,9 +604,9 @@ Third-order Taylor expansion:
 - `ΔP/P` = relative price change
 
 **Implementation:**
-- `MathLib.sol` - Golden ratio calculations
-- `PoolLib.sol` - CPMM price impact
-- `BofhContractV2.sol` - Optimization engine
+- `MathLib.sol` - Fixed-point helpers (sqrt, cbrt, log2, exp2)
+- `PoolLib.sol` - CPMM price impact and per-hop swap validation
+- `BofhContractV2.sol` - Multi-hop / multi-DEX execution engine
 
 **Mathematical Rigor:**
 - Newton's method for √ and ∛
@@ -734,7 +726,7 @@ test/
 <tr>
 <td>Complex 4-hop swap</td>
 <td align="right"><code>~316,000</code></td>
-<td>Golden ratio optimization</td>
+<td>Multi-hop execution</td>
 </tr>
 <tr>
 <td>Complex 5-hop swap (max)</td>
@@ -1130,7 +1122,7 @@ Research and innovation in AMM optimization
 
 ## 🏆 Built with Advanced Mathematics & Security-First Design
 
-### **BofhContract V2** - *Where Golden Ratio meets DeFi*
+### **BofhContract V2** - *A non-custodial multi-hop / multi-DEX atomic swap executor*
 
 ---
 
