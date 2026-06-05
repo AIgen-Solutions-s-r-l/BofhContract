@@ -1,0 +1,96 @@
+{
+  "_comment": [
+    "Copy to research/config.json (gitignored) and fill in real RPCs.",
+    "RPC URLs are read from environment variables named by `rpcEnv` so secrets never",
+    "land in git. Factory addresses are intentionally duplicated from",
+    "scripts/utils/addresses.js so the research toolkit stays runnable without loading",
+    "the Hardhat runtime; keep them in sync (research/config.js re-exports the canonical",
+    "list from addresses.js and will WARN if this file drifts).",
+    "",
+    "TARGET-CHAIN RATIONALE (see README): the edge only survives on thin / soft-",
+    "competition chains. Mainstream Ethereum L1 and contested L2s are excluded on",
+    "purpose. Start with whichever of these has the cheapest archive access for you."
+  ],
+
+  "baseTokenSymbol": "wrappedNative",
+
+  "scan": {
+    "_comment": "Stage-1 scanner knobs. Real enumeration is TODO; these gate the skeleton.",
+    "maxPairsPerFactory": 2000,
+    "reserveBatchSize": 100,
+    "minReserveBaseToken": "1.0",
+    "snapshotBlockTag": "latest",
+    "snapshotOutPath": "research/data/snapshot.latest.json"
+  },
+
+  "pathfinder": {
+    "_comment": "Stage-2 negative-cycle search knobs. Mirrors contract MAX_PATH_LENGTH=5.",
+    "maxHops": 5,
+    "minHops": 2,
+    "minEdgeReserveBaseToken": "1.0",
+    "topN": 50
+  },
+
+  "gas": {
+    "_comment": "Stage-3/4 cost model. priorityFeeGwei + baseFeeGwei feed gasModel.js.",
+    "baseFeeGwei": 1.0,
+    "priorityFeeGwei": 1.0,
+    "nativeUsdPrice": 600.0,
+    "executor": "bofhV2"
+  },
+
+  "kill": {
+    "_comment": "Stage-4 GO/KILL thresholds. See backtester.js + README kill-criteria.",
+    "minNetProfitToFrictionRatio": 2.5,
+    "minWinRate": 0.10,
+    "minNetUsdPerOpportunity": 0.5,
+    "minOpportunitiesPerDay": 5,
+    "maxAcceptableRevertRate": 0.30,
+    "infraCostUsdPerDay": 30.0
+  },
+
+  "chains": {
+    "bsc": {
+      "enabled": true,
+      "chainId": 56,
+      "rpcEnv": "RESEARCH_RPC_BSC",
+      "rpcFallbackEnv": "RESEARCH_RPC_BSC_FALLBACK",
+      "wsEnv": "RESEARCH_WS_BSC",
+      "multicall3": "0xcA11bde05977b3631167028862bE2a173976CA11",
+      "baseTokenSymbol": "WBNB",
+      "factories": {
+        "_comment": "Mirror of FACTORIES.bsc in scripts/utils/addresses.js. feeBps MUST be per-fork: PancakeV2=25, Biswap=10, ApeSwap=20. Verified at scan time, never trusted blindly.",
+        "PancakeSwapV2": { "address": "0xcA143Ce32Fe78f1f7019d7d551a6402fC5350c73", "feeBps": 25 },
+        "BiswapV2": { "address": "0x858E3312ed3A876947EA49d572A7C42DE08af7EE", "feeBps": 10 },
+        "ApeSwapV2": { "address": "0x0841BD0B734E4F5853f0dD8d7Ea041c241fb0Da6", "feeBps": 20 }
+      }
+    },
+
+    "base": {
+      "enabled": false,
+      "chainId": 8453,
+      "rpcEnv": "RESEARCH_RPC_BASE",
+      "rpcFallbackEnv": "RESEARCH_RPC_BASE_FALLBACK",
+      "wsEnv": "RESEARCH_WS_BASE",
+      "multicall3": "0xcA11bde05977b3631167028862bE2a173976CA11",
+      "baseTokenSymbol": "WETH",
+      "factories": {
+        "UniswapV2": { "address": "0x8909Dc15e40173Ff4699343b6eB8132c65e18eC6", "feeBps": 30 }
+      }
+    },
+
+    "polygon": {
+      "enabled": false,
+      "chainId": 137,
+      "rpcEnv": "RESEARCH_RPC_POLYGON",
+      "rpcFallbackEnv": "RESEARCH_RPC_POLYGON_FALLBACK",
+      "wsEnv": "RESEARCH_WS_POLYGON",
+      "multicall3": "0xcA11bde05977b3631167028862bE2a173976CA11",
+      "baseTokenSymbol": "WMATIC",
+      "factories": {
+        "QuickSwapV2": { "address": "0x5757371414417b8C6CAad45bAeF941aBc7d3Ab32", "feeBps": 30 },
+        "SushiSwapV2": { "address": "0xc35DADB65012eC5796536bD9864eD8773aBc74C4", "feeBps": 30 }
+      }
+    }
+  }
+}

@@ -1,0 +1,8 @@
+# Local research config holds RPC endpoints — never commit it. Use config.example.json
+# as the committed template and keep your filled-in copy here, ignored.
+config.json
+
+# Pool snapshots, opportunity logs, and any recorded chain data the pipeline writes.
+data/
+*.snapshot.json
+snapshot.*.json
