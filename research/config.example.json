@@ -20,7 +20,7 @@
     "reserveBatchSize": 100,
     "minReserveBaseToken": "1.0",
     "snapshotBlockTag": "latest",
-    "snapshotOutPath": "research/data/snapshot.latest.json"
+    "snapshotOutPath": "research/data/snapshot.json"
   },
 
   "pathfinder": {

@@ -87,6 +87,20 @@ The research is unambiguous: **every measured on-chain extraction market in 2025
 - **Retail sniping (#8)** is directional speculation, not market-neutral extraction. >60% of participants lose. Copy-trading makes you a KOL's exit liquidity. The tooling layer is saturated by funded incumbents.
 - **OEV / liquidations (#2, #3)** are genuinely permissionless and winnable on bid-math — but Chainlink SVR liquidation recapture is already **>80% with many onboarded searchers** (late and crowded), and in these venues you bid *into someone else's ordering* via EIP-712 bundles, so **our executor contributes nothing to the win condition.** Good hedge, bad reason to keep the contract.
 
+> **Sources / caveat.** The specific figures in §3 — e.g. "$233.8M CEX-DEX extracted
+> Aug-2023→Mar-2025", "top 3 searchers ~90%", "~130M gas / ~350 failed txs per arb",
+> "BSC ~80%+ two builders", "Base ~2 entities >80% of blocks", "independent searchers
+> retain ~17%", "Chainlink SVR recapture >80%", "JIT V3 ~0.007% ROI", "cross-chain ~67%
+> pre-positioned inventory / >50% from 5 addresses" — are **directional figures drawn from
+> public 2024–2025 MEV research**, not first-party measurements. Source types include the
+> **Flashbots research/transparency materials** ("limits of scaling" / blind-search
+> efficiency), **public MEV dashboards and explorers** (e.g. EigenPhi-style CEX-DEX/arb
+> analytics, builder/relay market-share trackers), **Chainlink SVR program reporting**, and
+> **academic / industry cross-chain-MEV studies**. They are used here only to rank strategy
+> attractiveness and should be **re-verified against current primary sources before any
+> capital or audit decision** — exact magnitudes drift quarter-to-quarter and no URL is
+> pinned on purpose to avoid implying a precision the figures don't have.
+
 ### Why #1 is the call
 
 **Long-tail / fresh-launch V2-fork backrunning** is the only strategy that satisfies all three conditions at once:
@@ -142,7 +156,7 @@ It reports: **net profit/opportunity, opportunities/day, gross-vs-net spread, wi
 **KILL the project if, on the best target chain over a representative window, ANY of:**
 
 1. Median **net-of-gas profit/opportunity < 2-3× total frictions** (fees + gas + bribe).
-2. Realistic **win-rate so low that expected daily net < infra + capital cost.**
+2. Realistic **win-rate so low that expected daily net < infra cost** (`infraCostUsdPerDay`). *(Capital cost is not yet modeled in `backtester.js`; the implemented check — KILL(2) — compares expected daily net against `infraCostUsdPerDay` only. Folding in a capital-carry term is a tracked TODO.)*
 3. The edge exists **only for a lean Huff executor**, never for a realistic executor at our gas profile — meaning we'd have to win the rewrite arms race just to break even.
 4. **Revert/loss rate** lands in the bad regime (the literature shows 5-40% daily revert on fast-finality rollups; honeypots compound this) and wipes expected value.
 
@@ -172,7 +186,7 @@ We do not strip the contract for production until the edge is proven. We do not 
 Proceed only when **all** hold on the best target chain over a representative window:
 
 - Median net-of-gas profit/opportunity **≥ 2-3× total frictions**, sustained.
-- Live-shadow **win-rate × opportunities/day** yields **expected daily net > infra + capital cost** with margin.
+- Live-shadow **win-rate × opportunities/day** yields **expected daily net > infra cost** (`infraCostUsdPerDay`, as enforced by KILL(2)) with margin. *(Capital-carry cost is not yet in the model — a tracked TODO; fold it in before treating this bar as complete.)*
 - Profitable at a **realistic (not Huff-only) executor gas profile** — i.e., a modest gas trim makes it work; we don't need to win a Huff arms race to break even.
 - **Revert/honeypot loss rate** controlled by the token-safety guard to a level that doesn't wipe EV.
 - Backtest survives the hygiene haircuts (2× slippage, latency, live-Sharpe −1) and is **not** in the Sharpe>3 overfit zone.

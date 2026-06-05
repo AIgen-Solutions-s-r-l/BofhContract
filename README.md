@@ -92,9 +92,10 @@
   - Geometric mean liquidity calculation
   - Newton's method for precision (sqrt, cbrt)
 
-- **Dynamic Programming**
-  - Bellman equation implementation
-  - Optimal routing across multiple hops
+- **Caller-Supplied Routing**
+  - Paths are chosen off-chain and passed in by the caller
+  - The contract executes the given path hop-by-hop (no on-chain routing)
+  - Per-hop price-impact validation via `PoolLib.validateSwap`
 
 </td>
 <td width="50%">
@@ -586,22 +587,19 @@ For each hop (reserveIn, reserveOut, feeBps):
 
 ### Price Impact Model
 
-**CPMM Analysis:**
+**Per-hop constant-product (CPMM):**
 
-Third-order Taylor expansion:
+Output pricing (`SwapMathLib.getAmountOut`) — per-hop fee on a 10000 basis:
 
 ```
-ΔP   =  -λ(ΔR/R)
-───
- P
-     + (λ²/2)(ΔR/R)²
-     - (λ³/6)(ΔR/R)³
+amountInWithFee = amountIn * (10000 - feeBps)
+amountOut = (amountInWithFee * reserveOut)
+            / (reserveIn * 10000 + amountInWithFee)
 ```
 
-**Where:**
-- `λ` = market depth parameter
-- `ΔR/R` = relative reserve change
-- `ΔP/P` = relative price change
+Price impact is computed **separately** and exactly from the x·y=k reserves
+(`PoolLib.calculatePriceImpact`, no λ / Taylor model) and checked against the
+configured per-hop cap in `PoolLib.validateSwap`.
 
 **Implementation:**
 - `MathLib.sol` - Fixed-point helpers (sqrt, cbrt, log2, exp2)
@@ -611,7 +609,8 @@ Third-order Taylor expansion:
 **Mathematical Rigor:**
 - Newton's method for √ and ∛
 - Geometric mean for liquidity
-- Bellman equations for routing
+- Routing is caller-supplied (off-chain); the contract does **no** on-chain
+  Bellman / dynamic-programming routing
 
 </td>
 </tr>

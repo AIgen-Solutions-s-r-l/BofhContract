@@ -372,36 +372,29 @@ Attackers manipulate pool prices to exploit price-dependent systems:
 
 **1. Price Impact Validation** (PoolLib.sol:120-150)
 ```solidity
-function calculatePriceImpact(
-    uint256 reserveIn,
-    uint256 reserveOut,
-    uint256 amountIn
-) internal pure returns (uint256 impact) {
-    // Third-order Taylor expansion for CPMM price impact
-    // ΔP/P = -λ(ΔR/R) + (λ²/2)(ΔR/R)² - (λ³/6)(ΔR/R)³
-
-    uint256 lambda = (amountIn * PRECISION) / reserveIn;
-    uint256 lambdaSquared = (lambda * lambda) / PRECISION;
-    uint256 lambdaCubed = (lambdaSquared * lambda) / PRECISION;
-
-    uint256 firstOrder = lambda;
-    uint256 secondOrder = lambdaSquared / 2;
-    uint256 thirdOrder = lambdaCubed / 6;
-
-    impact = firstOrder + secondOrder + thirdOrder;
-
-    return impact;
+// EXACT constant-product (x·y=k) marginal-price deviation — NOT a Taylor approximation.
+function calculatePriceImpact(uint256 amountIn, PoolState memory pool)
+    internal pure returns (uint256)
+{
+    if (amountIn == 0) return 0;
+    uint256 k             = pool.reserveIn * pool.reserveOut;
+    uint256 newReserveIn  = pool.reserveIn + amountIn;
+    uint256 newReserveOut = k / newReserveIn;              // exact post-swap reserves
+    uint256 oldPrice      = (pool.reserveOut * PRECISION) / pool.reserveIn;
+    uint256 newPrice      = (newReserveOut * PRECISION) / newReserveIn;
+    if (newPrice >= oldPrice) return 0;
+    return ((oldPrice - newPrice) * PRECISION) / oldPrice; // PRECISION-scaled deviation
 }
 ```
 
 **2. Liquidity Thresholds** (PoolLib.sol:53-55)
 ```solidity
-uint256 poolLiquidity = MathLib.geometricMean(reserveIn, reserveOut);
-if (poolLiquidity < minLiquidity) revert InsufficientLiquidity();
+// PoolLib enforces a raw reserve floor (the MathLib.geometricMean helper was removed)
+if (reserveIn < MIN_POOL_LIQUIDITY || reserveOut < MIN_POOL_LIQUIDITY) revert InsufficientLiquidity();
 ```
 - Prevents swaps in low-liquidity pools (easily manipulated)
-- Default `minPoolLiquidity = 100 * PRECISION`
-- Geometric mean: √(reserveIn × reserveOut) provides accurate liquidity measure
+- Enforced floor is `PoolLib.MIN_POOL_LIQUIDITY` (raw reserve units). Note: the contract-level
+  `minPoolLiquidity` risk parameter is currently NOT enforced in the swap path (see audit notes)
 
 **3. Maximum Trade Size** (PoolLib.sol:66-68)
 ```solidity
@@ -1215,7 +1208,7 @@ REPORT_GAS=true npm test
 
 **Critical Libraries to Review:**
 1. `SecurityLib` - Reentrancy guards, access control, MEV protection
-2. `MathLib` - Newton's method, golden ratio calculations
+2. `MathLib` - Newton's method (sqrt/cbrt), fixed-point exp2/log2
 3. `PoolLib` - Price impact, liquidity analysis
 
 **Edge Cases to Test:**

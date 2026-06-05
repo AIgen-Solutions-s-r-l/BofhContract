@@ -273,29 +273,22 @@ modifier antiMEV() {
 | Multiple price source validation | ❌ Missing | Single source (pool reserves) | - |
 | Price deviation checks | ✅ Complete | Price impact limits | PoolLib.sol:120-150 |
 | Liquidity threshold requirements | ✅ Complete | Minimum pool liquidity checks | PoolLib.sol:53-55 |
-| Large trade impact analysis | ✅ Complete | Third-order Taylor expansion | PoolLib.sol:120-150 |
+| Large trade impact analysis | ✅ Complete | Exact constant-product (x·y=k) marginal-price deviation | PoolLib.calculatePriceImpact |
 
 **Current Price Impact Calculation** (PoolLib.sol:120-150):
 ```solidity
-function calculatePriceImpact(
-    uint256 reserveIn,
-    uint256 reserveOut,
-    uint256 amountIn
-) internal pure returns (uint256 impact) {
-    // CPMM third-order Taylor expansion
-    // ΔP/P = -λ(ΔR/R) + (λ²/2)(ΔR/R)² - (λ³/6)(ΔR/R)³
-
-    uint256 lambda = (amountIn * PRECISION) / reserveIn;
-    uint256 lambdaSquared = (lambda * lambda) / PRECISION;
-    uint256 lambdaCubed = (lambdaSquared * lambda) / PRECISION;
-
-    uint256 firstOrder = lambda;
-    uint256 secondOrder = lambdaSquared / 2;
-    uint256 thirdOrder = lambdaCubed / 6;
-
-    impact = firstOrder + secondOrder + thirdOrder;
-
-    return impact;
+// EXACT constant-product (x·y=k) marginal-price deviation — NOT a Taylor approximation.
+function calculatePriceImpact(uint256 amountIn, PoolState memory pool)
+    internal pure returns (uint256)
+{
+    if (amountIn == 0) return 0;
+    uint256 k             = pool.reserveIn * pool.reserveOut;
+    uint256 newReserveIn  = pool.reserveIn + amountIn;
+    uint256 newReserveOut = k / newReserveIn;
+    uint256 oldPrice      = (pool.reserveOut * PRECISION) / pool.reserveIn;
+    uint256 newPrice      = (newReserveOut * PRECISION) / newReserveIn;
+    if (newPrice >= oldPrice) return 0;
+    return ((oldPrice - newPrice) * PRECISION) / oldPrice;
 }
 ```
 

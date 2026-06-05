@@ -20,6 +20,8 @@
  * for measurements.
  */
 
+const { ethers } = require('ethers');
+
 // Gas profiles: { baseGas, perHopGas }. Total = baseGas + perHopGas * hops, where
 // `hops` = number of swaps in the cycle = path.length - 1.
 const EXECUTOR_PROFILES = {
@@ -82,7 +84,9 @@ function gasCostForCycle(hops, gasCfg, executor = 'bofhV2') {
   const gasUnits = estimateGasUnits(hops, executor);
   const gasPriceWei = effectiveGasPriceWei(gasCfg);
   const costWei = BigInt(gasUnits) * BigInt(gasPriceWei);
-  const costNative = Number(costWei) / 1e18;
+  // PRECISION: costWei can exceed 2^53, so scale the bigint down by 1e18 exactly (as a
+  // decimal string via ethers) before converting to Number, instead of Number(costWei)/1e18.
+  const costNative = Number(ethers.formatEther(costWei));
   const nativeUsd = Number(gasCfg.nativeUsdPrice || 0);
   const costUsd = costNative * nativeUsd;
   return { gasUnits, gasPriceWei, costWei, costNative, costUsd, executor };
