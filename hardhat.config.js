@@ -4,6 +4,7 @@
 require("@nomicfoundation/hardhat-ethers");
 require("@nomicfoundation/hardhat-chai-matchers");
 require("@nomicfoundation/hardhat-network-helpers");
+require("@nomicfoundation/hardhat-verify");
 require("hardhat-gas-reporter");
 require("solidity-coverage");
 
@@ -20,11 +21,23 @@ try {
   BSCSCANAPIKEY = "placeholder";
 }
 
+// Shared signer config for all live networks
+const accounts = { mnemonic };
+
+// Per-chain block-explorer API keys (env-overridable; fall back to env.json's BSCSCANAPIKEY for BSC)
+const BSCSCAN_KEY = process.env.BSCSCAN_API_KEY || BSCSCANAPIKEY;
+const POLYGONSCAN_KEY = process.env.POLYGONSCAN_API_KEY || "placeholder";
+const BASESCAN_KEY = process.env.BASESCAN_API_KEY || "placeholder";
+
 /** @type import('hardhat/config').HardhatUserConfig */
 module.exports = {
   solidity: {
     version: "0.8.10",
     settings: {
+      // Pin the EVM target: solc 0.8.10 defaults to "london" (PUSH0-free). Pinning prevents a
+      // future solc bump from silently emitting PUSH0/MCOPY and bricking deploys on chains that
+      // lag Shanghai/Cancun. Override per-chain via EVM_VERSION (e.g. "paris", "cancun").
+      evmVersion: process.env.EVM_VERSION || "london",
       optimizer: {
         enabled: true,
         runs: 200
@@ -32,6 +45,8 @@ module.exports = {
     }
   },
 
+  // EVM-compatible networks. RPC URLs are env-overridable; all use the same mnemonic-derived signer.
+  // Adding a chain = one entry here + (for verification) one apiKey below.
   networks: {
     // Local Hardhat network (replaces Ganache)
     hardhat: {
@@ -42,28 +57,43 @@ module.exports = {
       }
     },
 
-    // BSC Testnet (Chain ID: 97)
+    // --- BNB Smart Chain ---
     bscTestnet: {
-      url: "https://data-seed-prebsc-1-s1.binance.org:8545",
+      url: process.env.BSC_TESTNET_RPC || "https://data-seed-prebsc-1-s1.binance.org:8545",
       chainId: 97,
-      accounts: {
-        mnemonic: mnemonic
-      },
+      accounts,
       gasPrice: 10000000000, // 10 gwei
-      timeout: 100000,
-      confirmations: 10
+      timeout: 100000
+    },
+    bsc: {
+      url: process.env.BSC_RPC || "https://bsc-dataseed1.binance.org",
+      chainId: 56,
+      accounts
     },
 
-    // BSC Mainnet (Chain ID: 56) - disabled for now
-    // bscMainnet: {
-    //   url: "https://bsc-dataseed1.binance.org",
-    //   chainId: 56,
-    //   accounts: {
-    //     mnemonic: mnemonic
-    //   },
-    //   gasPrice: 5000000000, // 5 gwei
-    //   confirmations: 10
-    // }
+    // --- Polygon PoS ---
+    polygon: {
+      url: process.env.POLYGON_RPC || "https://polygon-rpc.com",
+      chainId: 137,
+      accounts
+    },
+    polygonAmoy: {
+      url: process.env.POLYGON_AMOY_RPC || "https://rpc-amoy.polygon.technology",
+      chainId: 80002,
+      accounts
+    },
+
+    // --- Base ---
+    base: {
+      url: process.env.BASE_RPC || "https://mainnet.base.org",
+      chainId: 8453,
+      accounts
+    },
+    baseSepolia: {
+      url: process.env.BASE_SEPOLIA_RPC || "https://sepolia.base.org",
+      chainId: 84532,
+      accounts
+    }
   },
 
   // Gas reporter configuration
@@ -75,11 +105,15 @@ module.exports = {
     noColors: true
   },
 
-  // Etherscan verification
+  // Block-explorer verification (hardhat-verify). Per-chain keys, env-overridable.
   etherscan: {
     apiKey: {
-      bscTestnet: BSCSCANAPIKEY,
-      bsc: BSCSCANAPIKEY
+      bsc: BSCSCAN_KEY,
+      bscTestnet: BSCSCAN_KEY,
+      polygon: POLYGONSCAN_KEY,
+      polygonAmoy: POLYGONSCAN_KEY,
+      base: BASESCAN_KEY,
+      baseSepolia: BASESCAN_KEY
     }
   },
 

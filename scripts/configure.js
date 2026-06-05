@@ -1,6 +1,7 @@
 const hre = require('hardhat');
 const { ethers } = require('hardhat');
 const { loadDeployment, waitForTx, parseAmount } = require('./utils/helpers');
+const { isTestNetwork, isLocalNetwork } = require('./utils/addresses');
 
 async function main() {
   console.log('\n⚙️  Starting contract configuration...\n');
@@ -32,37 +33,28 @@ async function main() {
   // ==================================================================
   console.log('📊 STEP 1: Configuring Risk Parameters\n');
 
-  // Different parameters for different networks
-  let riskParams;
-  if (networkName === 'bsc') {
-    // Production mainnet - conservative parameters
-    riskParams = {
-      maxTradeVolume: parseAmount('100', 6),      // 100 tokens (in PRECISION units)
-      minPoolLiquidity: parseAmount('50', 6),     // 50 tokens minimum
-      maxPriceImpact: parseAmount('0.05', 6),     // 5% max price impact
-      sandwichProtectionBips: 25                   // 0.25% sandwich protection
-    };
-    console.log('   Using PRODUCTION parameters (conservative)');
-  } else if (networkName === 'bscTestnet') {
-    // Testnet - moderate parameters
-    riskParams = {
-      maxTradeVolume: parseAmount('1000', 6),     // 1000 tokens
-      minPoolLiquidity: parseAmount('100', 6),    // 100 tokens minimum
-      maxPriceImpact: parseAmount('0.10', 6),     // 10% max price impact
-      sandwichProtectionBips: 50                   // 0.5% sandwich protection
-    };
-    console.log('   Using TESTNET parameters (moderate)');
-  } else {
-    // Local/hardhat - permissive for testing
-    riskParams = {
-      maxTradeVolume: parseAmount('10000', 6),    // 10000 tokens
-      minPoolLiquidity: parseAmount('10', 6),     // 10 tokens minimum
-      maxPriceImpact: parseAmount('0.20', 6),     // 20% max price impact
-      maxPriceImpact: parseAmount('0.20', 6),     // 20% max price impact (corrected typo)
-      sandwichProtectionBips: 100                  // 1% sandwich protection
-    };
-    console.log('   Using LOCAL parameters (permissive for testing)');
-  }
+  // Risk tiers, selected from network metadata (not hardcoded names). Any unknown LIVE
+  // network falls through to the conservative mainnet tier — never the permissive one.
+  const RISK_TIERS = {
+    mainnet: { maxTradeVolume: '100',   minPoolLiquidity: '50',  maxPriceImpact: '0.05', sandwichProtectionBips: 25,  label: 'PRODUCTION (conservative)' },
+    testnet: { maxTradeVolume: '1000',  minPoolLiquidity: '100', maxPriceImpact: '0.10', sandwichProtectionBips: 50,  label: 'TESTNET (moderate)' },
+    local:   { maxTradeVolume: '10000', minPoolLiquidity: '10',  maxPriceImpact: '0.20', sandwichProtectionBips: 100, label: 'LOCAL (permissive for testing)' }
+  };
+
+  const tierName = isLocalNetwork(networkName)
+    ? 'local'
+    : isTestNetwork(networkName)
+      ? 'testnet'
+      : 'mainnet'; // unknown live network -> conservative, not permissive
+  const tier = RISK_TIERS[tierName];
+
+  const riskParams = {
+    maxTradeVolume: parseAmount(tier.maxTradeVolume, 6),
+    minPoolLiquidity: parseAmount(tier.minPoolLiquidity, 6),
+    maxPriceImpact: parseAmount(tier.maxPriceImpact, 6),
+    sandwichProtectionBips: tier.sandwichProtectionBips
+  };
+  console.log(`   Using ${tier.label} parameters`);
 
   console.log('\n   Parameters:');
   console.log(`      Max Trade Volume: ${ethers.formatUnits(riskParams.maxTradeVolume, 6)}`);
