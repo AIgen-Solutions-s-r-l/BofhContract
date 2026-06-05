@@ -74,8 +74,8 @@ function swap(address tokenIn, uint256 amountIn) { }
 #### Constants
 ```solidity
 // UPPER_SNAKE_CASE
-uint256 private constant GOLDEN_RATIO = 618034;
-uint256 public constant MAX_PATH_LENGTH = 5;
+uint256 private constant MAX_FEE_BPS = 1000;
+uint256 public constant MAX_PATH_LENGTH = 6;
 uint256 internal constant PRECISION = 1e6;
 ```
 
@@ -575,12 +575,12 @@ def execute_swap(path, amount):
 
 ### Examples
 ```
-feat(swap): add multi-path swap optimization
+feat(swap): add multi-DEX routing via per-hop dexId registry
 
-Implement golden ratio-based distribution for 4-way and 5-way swaps
-to minimize price impact across multiple paths.
+Resolve each hop's factory + fee from an owner-managed registry so one
+deployment can route a path across multiple V2 forks.
 
-Closes #42
+Closes #NN
 ```
 
 ```

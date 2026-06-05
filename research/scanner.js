@@ -255,7 +255,11 @@ async function main() {
     if (!snapshot) continue;
 
     const base = (config.scan && config.scan.snapshotOutPath) || 'research/data/snapshot.json';
-    const outPath = base.replace(/snapshot/, `snapshot.${chain.key}`);
+    // Canonical per-chain filename: snapshot.<chain>.json. Inject `.<chain>` right before
+    // the final extension so the result is deterministic regardless of the configured base
+    // (e.g. ".../snapshot.json" -> ".../snapshot.bsc.json"). Documented in research/README.md.
+    const ext = path.extname(base);
+    const outPath = `${base.slice(0, base.length - ext.length)}.${chain.key}${ext}`;
     const written = writeSnapshot(snapshot, outPath);
     console.log(
       `[scanner] ${chain.key}: ${snapshot.pools.length} pools @ block ${snapshot.blockNumber} -> ${written}`

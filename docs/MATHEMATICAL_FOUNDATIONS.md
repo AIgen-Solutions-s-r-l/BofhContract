@@ -1,5 +1,22 @@
 # Mathematical Foundations 📐
 
+> **Correction notice.** Earlier versions of this document presented "golden ratio (φ)
+> optimization", "Lagrange-multiplier optimality proofs", and "Bellman equations / dynamic
+> programming for routing" as the contract's mathematics. **None of that was ever wired into
+> the production swap path** — the optimization functions (`MathLib.calculateOptimalAmount`,
+> `PoolLib.calculateOptimalSwapAmount`) had zero production callers and have been **removed**.
+> `BofhContractV2` is a **sequential constant-product (x·y=k) multi-hop executor**: the full
+> input amount flows through each hop in order, priced with the standard Uniswap-V2
+> constant-product-with-fee formula. There is **no on-chain amount-splitting, no golden-ratio
+> path optimization, no Lagrange optimizer, and no on-chain Bellman/dynamic-programming
+> router** — any path-finding or amount-sizing belongs **off-chain**, not in the executor.
+>
+> The sections below marked **(historical design note)** describe an earlier, never-shipped
+> proposal and are kept for context only. The **legitimate, real math is also retained**:
+> the constant-product formula (§1.1), the `getAmountOut`-with-fee relation, per-hop price
+> impact, and the Newton-Raphson and geometric-mean primitives (§4) genuinely back the
+> deployed code.
+
 ## Arbitrage Theory and Implementation 📚
 
 This document provides an in-depth analysis of the mathematical principles underlying the BofhContract's arbitrage and swap mechanisms.
@@ -29,9 +46,15 @@ For n connected pools, we analyze the composite function:
 f(x1, ..., xn) = ∏i (xi * yi = ki)
 ```
 
-### 2. Optimal Path Execution 🛣️
+### 2. Optimal Path Execution 🛣️ *(historical design note — NOT shipped behavior)*
 
-#### 2.1 Golden Ratio Optimization
+> ⚠️ **This entire section describes a never-shipped proposal.** The golden-ratio split,
+> the Lagrange-multiplier "proof", and the Bellman/dynamic-programming router below were
+> **never wired into production and have been removed from the code**. The deployed contract
+> does **no** on-chain path optimization; it executes a caller-supplied path hop-by-hop.
+> Retained for historical context only.
+
+#### 2.1 Golden Ratio Optimization *(historical — removed from code)*
 
 The golden ratio φ ≈ 0.618034 emerges from solving:
 ```
@@ -63,14 +86,19 @@ For 5-way paths:
 ≈ [0.381966, 0.236068, 0.145898, 0.090170, 0.145898]
 ```
 
-#### 2.2 Dynamic Programming Implementation
+#### 2.2 Dynamic Programming Implementation *(historical — never implemented on-chain)*
+
+> ⚠️ The Bellman-equation router below was **never implemented in the contract**. There is
+> no `optimizePath` / `calculateOptimalSplit` / `reconstructPath` in the deployed code; the
+> snippet is illustrative of the abandoned proposal only. Routing (which path to trade) is a
+> **caller-supplied, off-chain** decision.
 
 The Bellman equation for path optimization:
 ```
 V(s) = max_{a∈A} {R(s,a) + γV(s')}
 ```
 
-Implementation in code:
+Illustrative (never shipped) pseudo-code:
 ```solidity
 function optimizePath(
     uint256[] memory reserves,
@@ -90,21 +118,31 @@ function optimizePath(
 
 #### 3.1 Slippage Estimation
 
-Third-order Taylor expansion for price impact:
+> ⚠️ **Correction.** The contract does **not** use the "third-order Taylor / λ market-depth"
+> series shown below — that was part of the never-shipped optimization proposal. The deployed
+> price-impact check is the **exact constant-product impact** computed per hop in
+> `PoolLib.validateSwap` directly from `(reserveIn, reserveOut, amountIn)` and the per-hop
+> fee, then compared against the configured cap. The Taylor expansion is retained here only as
+> a historical note.
+
+Historical (never-shipped) third-order Taylor expansion for price impact:
 ```
 ΔP/P ≈ -λ(ΔR/R) + (λ2/2)(ΔR/R)2 - (λ3/6)(ΔR/R)3
 ```
 
-Implementation:
-```solidity
-function calculatePriceImpact(
-    uint256 amountIn,
-    uint256 reserveIn,
-    uint256 reserveOut
-) internal pure returns (uint256) {
-    // Detailed implementation
-}
+**Actual deployed model — exact CPMM (x·y=k).** For a hop with reserves
+`(reserveIn, reserveOut)`, fee `feeBps`, and input `amountIn`:
 ```
+// Output pricing — SwapMathLib.getAmountOut
+amountInWithFee = amountIn * (10000 - feeBps)
+amountOut       = (amountInWithFee * reserveOut)
+                  / (reserveIn * 10000 + amountInWithFee)
+
+// Price impact (separate) — PoolLib.calculatePriceImpact
+priceImpact     = (oldPrice - newPrice) / oldPrice, from the post-swap x·y=k reserves
+```
+The per-hop price impact is enforced against the configured cap in `PoolLib.validateSwap`;
+there is no λ / Taylor model in code.
 
 #### 3.2 Volatility Tracking
 
@@ -172,11 +210,14 @@ function optimizedSwap(
 
 #### 6.2 Computational Complexity
 
-| Algorithm         | Time Complexity | Space Complexity |
-|------------------|----------------|------------------|
-| Path optimization| O(n)           | O(1)             |
-| Price impact     | O(1)           | O(1)             |
-| Volatility calc  | O(1)           | O(1)             |
+> ⚠️ The "Path optimization" row refers to the removed/never-shipped on-chain optimizer and
+> does not describe the deployed contract (which performs no on-chain path optimization).
+
+| Algorithm                          | Time Complexity | Space Complexity |
+|------------------------------------|----------------|------------------|
+| Path optimization *(removed)*      | O(n)           | O(1)             |
+| Price impact (per-hop CPMM)        | O(1)           | O(1)             |
+| Volatility calc                    | O(1)           | O(1)             |
 
 ### 7. Future Optimizations 🔮
 

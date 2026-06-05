@@ -1,5 +1,12 @@
 # BofhContract API Reference
 
+> **Correction notice.** The "golden ratio-based path distribution / optimization" described
+> below was **never wired into production and has been removed**. `BofhContractV2` is a
+> **sequential constant-product (x·y=k) multi-hop / multi-DEX atomic executor**: it runs a
+> caller-supplied path hop-by-hop with no on-chain amount-splitting or golden-ratio
+> optimization. Treat any "golden ratio" / `calculateOptimalAmount` reference here as
+> historical.
+
 ## Table of Contents
 - [Overview](#overview)
 - [BofhContractV2](#bofhcontractv2)

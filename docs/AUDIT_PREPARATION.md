@@ -9,7 +9,13 @@
 
 ## Executive Summary
 
-BofhContract V2 is an advanced multi-path token swap optimizer for Binance Smart Chain implementing golden ratio-based optimization algorithms. The system has undergone extensive internal testing, achieving 94% production code coverage and implementing comprehensive security measures.
+> **Correction notice.** References to "golden ratio-based optimization" / `calculateOptimalAmount`
+> / "third-order Taylor" price-impact in this document are **historical**: that optimization
+> was never wired into production and has been **removed**. The actual audit target is a
+> **sequential constant-product (x·y=k) multi-hop / multi-DEX atomic executor** that runs a
+> caller-supplied path hop-by-hop, with per-hop CPMM price-impact validation in `PoolLib`.
+
+BofhContract V2 is a multi-path token swap / arbitrage router for EVM chains (BSC, Polygon, Base, …): a sequential constant-product (x·y=k) multi-hop / multi-DEX atomic executor that runs caller-supplied paths hop-by-hop with per-hop CPMM price-impact validation. It has undergone extensive internal testing and implements comprehensive security measures. It performs **no on-chain path optimization** — the earlier golden-ratio claims described removed dead code.
 
 **Audit Scope:** ~1,510 lines of production Solidity code
 **Test Coverage:** 94% (179 passing tests)
@@ -63,7 +69,7 @@ BofhContractV2 (Main Implementation)
 
 ### Key Features
 
-1. **Golden Ratio Optimization** - φ-based path splitting for 4/5-way swaps
+1. **Multi-DEX Routing** - per-hop DEX registry (dexId → factory/fee), fee-correct sequential CPMM execution of caller-supplied paths (no on-chain optimization)
 2. **MEV Protection** - Flash loan detection + rate limiting
 3. **Batch Operations** - Atomic multi-swap execution (up to 10 swaps)
 4. **Emergency Controls** - Circuit breakers, pause functionality, token recovery
@@ -172,7 +178,7 @@ BofhContractV2 (Main Implementation)
 
 4. **Price Manipulation**
    - Mitigation: Pool liquidity checks, price impact limits
-   - Coverage: Third-order Taylor expansion for CPMM analysis
+   - Coverage: Per-hop constant-product (x·y=k) price-impact cap (PoolLib.validateSwap)
 
 5. **Access Control Bypass**
    - Mitigation: Owner/operator roles, comprehensive checks
@@ -194,25 +200,20 @@ BofhContractV2 (Main Implementation)
 
 ### Critical Mathematical Components
 
-1. **Golden Ratio Distribution** (φ ≈ 0.618034)
-   - Used for optimal multi-path splitting
-   - Implementation: MathLib.sol lines 45-80
-   - **Audit Focus:** Verify optimality proofs
+1. **Constant-Product Pricing with Fee** (x·y=k)
+   - Single shared formula: amountInWithFee = amountIn·(10000−feeBps); out = amountInWithFee·reserveOut / (reserveIn·10000 + amountInWithFee)
+   - Implementation: SwapMathLib.getAmountOut (shared by the swap hot path and the fee-aware views)
+   - **Audit Focus:** Rounding/truncation, overflow, fee-bps bounds (≤ MAX_FEE_BPS = 1000)
 
 2. **Newton's Method** (Square Root, Cube Root)
    - Iterative approximation for roots
    - Implementation: MathLib.sol lines 20-44, 82-115
    - **Audit Focus:** Convergence guarantees, precision
 
-3. **CPMM Price Impact** (Third-order Taylor Expansion)
-   - ΔP/P = -λ(ΔR/R) + (λ²/2)(ΔR/R)² - (λ³/6)(ΔR/R)³
-   - Implementation: PoolLib.sol lines 120-150
-   - **Audit Focus:** Approximation accuracy
-
-4. **Geometric Mean** (Pool Reserve Analysis)
-   - Uses log approximation for large values
-   - Implementation: MathLib.sol lines 117-145
-   - **Audit Focus:** Overflow protection
+3. **CPMM Price Impact** (exact x·y=k, no Taylor approximation)
+   - Marginal-price deviation computed directly from the constant-product reserves; capped per-hop at maxPriceImpact
+   - Implementation: PoolLib.calculatePriceImpact / PoolLib.validateSwap
+   - **Audit Focus:** Per-hop cap enforcement; impact-vs-trader-slippage semantics
 
 **Documentation:** See [MATHEMATICAL_FOUNDATIONS.md](MATHEMATICAL_FOUNDATIONS.md)
 
@@ -300,8 +301,8 @@ BofhContractV2 (Main Implementation)
 
 3. **MathLib.sol**
    - `sqrt` / `cbrt` - Newton's method implementation
-   - `geometricMean` - Log approximation
-   - `calculateOptimalAmount` - Golden ratio distribution
+   - `exp2` / `log2` - fixed-point primitives
+   (golden-ratio `calculateOptimalAmount` and `geometricMean` were never wired into execution and have been removed)
 
 4. **PoolLib.sol**
    - `analyzePool` - Pool state analysis
@@ -490,9 +491,9 @@ contracts/
 uint256 constant PRECISION = 1e6;              // Base precision
 uint256 constant MAX_SLIPPAGE = 1e4;           // 1% (10000 = 1%)
 uint256 constant MIN_OPTIMALITY = 5e5;         // 50% (500000 = 50%)
-uint256 constant MAX_PATH_LENGTH = 5;          // Maximum swap hops
+uint256 constant MAX_PATH_LENGTH = 6;          // Max tokens per path (= 5 hops)
 uint256 constant MAX_BATCH_SIZE = 10;          // Maximum batch swaps
-uint256 constant GOLDEN_RATIO = 618034;        // φ * 1e6
+uint256 constant MAX_FEE_BPS = 1000;           // Max per-hop fee (10%)
 ```
 
 ### C. Event Definitions

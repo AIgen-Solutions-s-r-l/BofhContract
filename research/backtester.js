@@ -23,6 +23,7 @@
  * The kill-criteria are deliberately strict and explicit so a GO is earned, not assumed.
  */
 
+const { ethers } = require('ethers');
 const { getAmountOut } = require('./pathfinder.js');
 const { gasCostForCycle, compareExecutors } = require('./gasModel.js');
 
@@ -117,12 +118,18 @@ function optimalInput(hops, opts = {}) {
 /**
  * Convert a wei base-token amount to USD using the native-token USD price as a proxy.
  * (TODO: real per-token USD; for a wrapped-native base token this proxy is exact.)
- * @param {bigint} wei
+ *
+ * PRECISION: `wei` can exceed Number.MAX_SAFE_INTEGER (2^53 ≈ 9.0e15 wei), so a naive
+ * `Number(wei)` would silently lose precision and corrupt the USD/PnL figure. We instead
+ * format the bigint to a decimal *string* of whole tokens via ethers (scaling down by 1e18
+ * exactly, in bigint) and only then convert that already-small magnitude to Number.
+ * @param {bigint} wei - may be negative (e.g. a net loss).
  * @param {number} nativeUsdPrice
  * @returns {number}
  */
 function weiToUsd(wei, nativeUsdPrice) {
-  return (Number(wei) / 1e18) * Number(nativeUsdPrice || 0);
+  const tokens = Number(ethers.formatUnits(BigInt(wei), 18));
+  return tokens * Number(nativeUsdPrice || 0);
 }
 
 /**
